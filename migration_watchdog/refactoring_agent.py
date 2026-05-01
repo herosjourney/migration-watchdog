@@ -158,22 +158,39 @@ def create_refactoring_finding(
 # ---------------------------------------------------------------------------
 
 REFACTORING_SYSTEM_PROMPT = """You are the Migration Plugin Watchdog Refactoring Assessor. \
-Your job is to evaluate whether the plugin's structure warrants refactoring.
+Your job is to evaluate whether the plugin's structure and architecture warrants refactoring.
 
-Consider:
+Look for architectural patterns AND structural issues, including:
+
+**Architectural patterns:**
+- State machine failure recovery (do phases have replay/rewind? do they emit draft artifacts?)
+- Context loading strategy (is there per-phase context budget? or does the skill blindly load all refs?)
+- Multi-agent orchestration (is it single-threaded? could large migrations benefit from sub-agents?)
+- Validation checkpoints and fail-closed gates
+- Artifact checksumming and hand-edit detection
+- Token cost measurement per phase
+
+**Structural issues:**
 - File organization and naming conventions
 - Content duplication across files
 - Accumulated findings patterns (are the same areas repeatedly flagged?)
-- Whether the current structure supports easy updates
 - Whether new content areas (AgentCore, Strands SDK) fit naturally
+- Excessive coupling between phases
 
-If you identify a refactoring opportunity, create a finding with:
-- Clear advantages of the refactoring
-- Clear disadvantages and risks
-- A concrete description of what the new structure would look like
+Review the provided SKILL.md and phase orchestration files carefully. Look for:
+- Places where the skill relies on agent discretion where it should be declarative
+- Missing failure recovery documentation
+- Scalability limits that should be documented but aren't
 
-Only suggest refactoring when there's a genuine structural improvement. \
-Don't suggest changes for the sake of change."""
+If you identify genuine improvements, create one finding per distinct recommendation using \
+create_refactoring_finding. Each finding should have:
+- Clear advantages (what problem does it solve?)
+- Clear disadvantages and risks (what's the cost of the change?)
+- A concrete description of what the new structure/pattern would look like
+
+Create multiple findings if there are multiple independent improvements. Don't bundle \
+unrelated concerns. Only suggest genuinely valuable changes — don't change for the sake \
+of change."""
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +203,7 @@ def create_refactoring_agent() -> Agent:
     model = BedrockModel(
         model_id="us.anthropic.claude-opus-4-7",
         region_name="us-east-1",
+        max_tokens=16000,
     )
     return Agent(
         model=model,
@@ -219,6 +237,16 @@ def _build_refactoring_prompt(
         + json.dumps(repo_files_summary, indent=2)
         + "\n```\n"
     )
+
+    # Include key architectural files for deep review
+    sections.append("## Key Architectural Files (for deep review)\n")
+    arch_keywords = ["SKILL.md", "skill.md", "phases/clarify/clarify.md",
+                     "phases/design/design.md", "phases/discover/discover.md",
+                     "phases/estimate/estimate.md", "phases/generate/generate.md",
+                     "phases/feedback/feedback.md", "design-refs/index.md"]
+    for path, content in repo_content.files.items():
+        if any(kw in path for kw in arch_keywords):
+            sections.append(f"### {path}\n```\n{content[:3000]}\n```\n")
 
     # Findings history
     sections.append("## Accumulated Findings History\n")

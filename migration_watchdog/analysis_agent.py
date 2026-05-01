@@ -471,6 +471,7 @@ def create_analysis_agent() -> Agent:
     model = BedrockModel(
         model_id="us.anthropic.claude-opus-4-7",
         region_name="us-east-1",
+        max_tokens=16000,
     )
     return Agent(
         model=model,
