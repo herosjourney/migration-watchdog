@@ -469,7 +469,7 @@ SKIP that topic entirely rather than guessing from training data.
 def create_analysis_agent() -> Agent:
     """Create the Strands analysis agent with Claude Opus 4.7."""
     model = BedrockModel(
-        model_id="us.anthropic.claude-opus-4-7-v1:0",
+        model_id="us.anthropic.claude-opus-4-7",
         region_name="us-east-1",
     )
     return Agent(

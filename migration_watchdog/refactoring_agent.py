@@ -184,7 +184,7 @@ Don't suggest changes for the sake of change."""
 def create_refactoring_agent() -> Agent:
     """Create the Strands refactoring assessment agent with Claude Opus 4.7."""
     model = BedrockModel(
-        model_id="us.anthropic.claude-opus-4-7-v1:0",
+        model_id="us.anthropic.claude-opus-4-7",
         region_name="us-east-1",
     )
     return Agent(
