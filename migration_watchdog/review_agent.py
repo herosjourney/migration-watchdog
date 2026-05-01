@@ -14,7 +14,7 @@ import logging
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
 
-from watchdog.models import AuthoritativeData, Finding, ReviewResult, RiskLevel
+from migration_watchdog.models import AuthoritativeData, Finding, ReviewResult, RiskLevel
 
 logger = logging.getLogger(__name__)
 

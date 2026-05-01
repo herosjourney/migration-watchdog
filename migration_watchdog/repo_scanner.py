@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 import httpx
 import jwt
 
-from watchdog.models import PullRequest, RepoContent
-from watchdog.retry import retry_with_backoff
+from migration_watchdog.models import PullRequest, RepoContent
+from migration_watchdog.retry import retry_with_backoff
 
 # Path prefix for markdown files to scan in the target repo.
 REFERENCES_PATH = "features/migration-to-aws/skills/gcp-to-aws/references"

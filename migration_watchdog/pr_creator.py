@@ -13,8 +13,8 @@ import time
 import httpx
 import jwt
 
-from watchdog.models import Finding, RiskLevel
-from watchdog.retry import retry_with_backoff
+from migration_watchdog.models import Finding, RiskLevel
+from migration_watchdog.retry import retry_with_backoff
 
 # GitHub API base URL.
 GITHUB_API = "https://api.github.com"

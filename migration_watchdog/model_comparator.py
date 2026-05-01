@@ -6,7 +6,7 @@ source data to detect staleness in model lists, lifecycle status, and pricing.
 
 from __future__ import annotations
 
-from watchdog.models import ModelComparisonEntry, ModelLifecycleEntry
+from migration_watchdog.models import ModelComparisonEntry, ModelLifecycleEntry
 
 
 def compare_model_lists(

@@ -53,7 +53,7 @@ jobs:
         run: pip install -r requirements-watchdog.txt
 
       - name: Run watchdog scan
-        run: python -m watchdog.main
+        run: python -m migration_watchdog.main
         env:
           GITHUB_APP_ID: ${{ secrets.WATCHDOG_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.WATCHDOG_APP_PRIVATE_KEY }}

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from watchdog.models import Dismissal, Finding, PullRequest
+from migration_watchdog.models import Dismissal, Finding, PullRequest
 
 
 def deduplicate(

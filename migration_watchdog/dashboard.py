@@ -17,9 +17,9 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from mangum import Mangum
 
-from watchdog.findings_repository import FindingsRepository
-from watchdog.models import Finding, RiskLevel, ScanRun
-from watchdog.pr_creator import PRCreator
+from migration_watchdog.findings_repository import FindingsRepository
+from migration_watchdog.models import Finding, RiskLevel, ScanRun
+from migration_watchdog.pr_creator import PRCreator
 
 # ---------------------------------------------------------------------------
 # Configuration from environment variables

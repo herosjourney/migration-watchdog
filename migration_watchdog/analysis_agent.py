@@ -16,15 +16,15 @@ import httpx
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
 
-from watchdog.models import (
+from migration_watchdog.models import (
     AuthoritativeData,
     Finding,
     ModelStalenessResult,
     RepoContent,
     classify_risk,
 )
-from watchdog.pricing_comparator import compare_pricing_entries, parse_pricing_cache
-from watchdog.model_comparator import (
+from migration_watchdog.pricing_comparator import compare_pricing_entries, parse_pricing_cache
+from migration_watchdog.model_comparator import (
     compare_model_lifecycle,
     compare_model_lists,
     compare_model_pricing,
@@ -111,7 +111,7 @@ def compare_models(repo_model_md: str, provider: str, current_models_json: str) 
     added, removed = compare_model_lists(repo_model_names, current_model_names)
 
     # Lifecycle comparison if lifecycle entries are provided
-    from watchdog.models import ModelLifecycleEntry
+    from migration_watchdog.models import ModelLifecycleEntry
 
     repo_lifecycle = [
         ModelLifecycleEntry(

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
-from watchdog.models import PricingEntry, PricingValidationResult
+from migration_watchdog.models import PricingEntry, PricingValidationResult
 
 # Sections that use infrastructure tolerance (10%)
 _INFRA_SECTIONS = frozenset(

@@ -18,14 +18,14 @@ from uuid import uuid4
 
 import boto3
 
-from watchdog.analysis_agent import run_analysis
-from watchdog.finding_deduplicator import deduplicate
-from watchdog.findings_repository import FindingsRepository
-from watchdog.models import Finding, RiskLevel, ScanRun
-from watchdog.refactoring_agent import run_refactoring_assessment
-from watchdog.repo_scanner import RepoScanner
-from watchdog.review_agent import review_findings
-from watchdog.source_fetcher import SourceFetcher
+from migration_watchdog.analysis_agent import run_analysis
+from migration_watchdog.finding_deduplicator import deduplicate
+from migration_watchdog.findings_repository import FindingsRepository
+from migration_watchdog.models import Finding, RiskLevel, ScanRun
+from migration_watchdog.refactoring_agent import run_refactoring_assessment
+from migration_watchdog.repo_scanner import RepoScanner
+from migration_watchdog.review_agent import review_findings
+from migration_watchdog.source_fetcher import SourceFetcher
 
 logging.basicConfig(
     level=logging.INFO,

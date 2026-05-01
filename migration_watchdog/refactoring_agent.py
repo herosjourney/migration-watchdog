@@ -16,7 +16,7 @@ from uuid import uuid4
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
 
-from watchdog.models import (
+from migration_watchdog.models import (
     Finding,
     RepoContent,
     RiskLevel,

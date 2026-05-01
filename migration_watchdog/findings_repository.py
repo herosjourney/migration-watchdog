@@ -12,7 +12,7 @@ from datetime import datetime
 from boto3.dynamodb.conditions import Attr, Key
 from dateutil.relativedelta import relativedelta
 
-from watchdog.models import Dismissal, Finding, RiskLevel, ScanRun
+from migration_watchdog.models import Dismissal, Finding, RiskLevel, ScanRun
 
 
 class FindingsRepository:

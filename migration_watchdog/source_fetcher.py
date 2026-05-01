@@ -17,14 +17,14 @@ from typing import Any
 import boto3
 import httpx
 
-from watchdog.models import (
+from migration_watchdog.models import (
     AuthoritativeData,
     BedrockLifecycle,
     GeminiModelData,
     ModelLifecycleEntry,
     OpenAIModelData,
 )
-from watchdog.retry import retry_with_backoff
+from migration_watchdog.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
