@@ -709,7 +709,9 @@ def _build_guidance_prompt(
     # Only include design-ref files (not phases, not shared)
     design_ref_keywords = ["design-refs/compute", "design-refs/database",
                            "design-refs/storage", "design-refs/networking",
-                           "design-refs/messaging", "design-refs/security"]
+                           "design-refs/messaging", "design-refs/security",
+                           "design-refs/ai.md", "design-refs/ai-gemini",
+                           "design-refs/ai-openai"]
     for path, content in repo_content.files.items():
         if any(kw in path for kw in design_ref_keywords):
             sections.append(f"### File: {path}\n```\n{content[:4000]}\n```\n")
@@ -731,6 +733,8 @@ def _build_guidance_prompt(
     sections.append(
         "\n## Instructions\n"
         "Compare each design-ref file against current AWS best practices. "
+        "Pay special attention to the AI files — check if guidance on agentic workflows, "
+        "Bedrock Agents, AgentCore, and Strands SDK is current. "
         "Use compare_design_ref tool and web_search to verify. "
         "Create findings for outdated guidance. "
         "Every finding must have source_urls."
@@ -752,6 +756,13 @@ def _build_new_content_prompt(
         sections.append(f"- {path}")
     sections.append("")
 
+    # Include AI-related file content snippets so the agent can see what's covered
+    sections.append("### Current AI/Agent Coverage in Repo\n")
+    ai_keywords = ["ai.md", "ai-gemini", "ai-openai", "ai-model-lifecycle"]
+    for path, content in repo_content.files.items():
+        if any(kw in path for kw in ai_keywords):
+            sections.append(f"#### {path} (first 2000 chars)\n```\n{content[:2000]}\n```\n")
+
     # Open PRs
     if repo_content.open_prs:
         sections.append("### Open Pull Requests\n")
@@ -768,9 +779,15 @@ def _build_new_content_prompt(
 
     sections.append(
         "\n## Instructions\n"
-        "Check for new content opportunities about Bedrock Agents, AgentCore, "
-        "AgentCore Harness, Strands SDK, and startup migration guidance. "
-        "Use check_new_content_opportunities and web_search tools. "
+        "Check for new content opportunities about:\n"
+        "1. **Bedrock Agents** — managed agent orchestration\n"
+        "2. **AgentCore** — agent runtime, harness, registry, evaluations\n"
+        "3. **Strands SDK** — open-source agent framework\n"
+        "4. **Agentic workflow migration** — how startups can migrate their "
+        "agentic workflows and AI agent architectures from other platforms to AWS\n"
+        "5. **Startup migration guidance** — specific patterns for startups\n\n"
+        "Review the 'Current AI/Agent Coverage in Repo' section to see what's already covered. "
+        "Use check_new_content_opportunities and web_search tools to find recent updates. "
         "Only suggest content not already covered by repo files or open PRs. "
         "Create findings for genuine gaps. Every finding must have source_urls."
     )
