@@ -612,53 +612,223 @@ def _build_analysis_prompt(
     return "\n".join(sections)
 
 
+def _build_pricing_prompt(
+    repo_content: RepoContent,
+    authoritative_data: AuthoritativeData,
+    run_id: str,
+) -> str:
+    """Build a focused prompt for pricing cache analysis only."""
+    sections: list[str] = [f"## Pricing Analysis for Run: {run_id}\n"]
+
+    # Only include pricing-cache.md
+    pricing_path = "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
+    for path, content in repo_content.files.items():
+        if "pricing-cache" in path:
+            sections.append(f"### File: {path}\n```\n{content[:8000]}\n```\n")
+
+    if authoritative_data.aws_pricing:
+        sections.append(
+            "### Current AWS Pricing\n```json\n"
+            + json.dumps(authoritative_data.aws_pricing, indent=2)[:4000]
+            + "\n```\n"
+        )
+
+    sections.append(
+        "\n## Instructions\n"
+        "Compare the pricing-cache.md against current pricing data using the compare_pricing tool. "
+        "Create findings for any price discrepancies that exceed tolerance thresholds. "
+        "Every finding must have source_urls."
+    )
+    return "\n".join(sections)
+
+
+def _build_models_prompt(
+    repo_content: RepoContent,
+    authoritative_data: AuthoritativeData,
+    run_id: str,
+) -> str:
+    """Build a focused prompt for AI model staleness analysis only."""
+    sections: list[str] = [f"## Model Staleness Analysis for Run: {run_id}\n"]
+
+    # Only include AI-related files
+    ai_keywords = ["ai-gemini", "ai-openai", "ai-model-lifecycle", "ai.md"]
+    for path, content in repo_content.files.items():
+        if any(kw in path for kw in ai_keywords):
+            sections.append(f"### File: {path}\n```\n{content[:6000]}\n```\n")
+
+    if authoritative_data.gemini_models.models or authoritative_data.gemini_models.pricing:
+        sections.append(
+            "### Gemini Model Data\n```json\n"
+            + json.dumps({
+                "models": authoritative_data.gemini_models.models,
+                "pricing": authoritative_data.gemini_models.pricing,
+                "deprecations": authoritative_data.gemini_models.deprecations,
+            }, indent=2)[:4000]
+            + "\n```\n"
+        )
+
+    if authoritative_data.openai_models.pricing:
+        sections.append(
+            "### OpenAI Model Data\n```json\n"
+            + json.dumps({
+                "pricing": authoritative_data.openai_models.pricing,
+                "deprecations": authoritative_data.openai_models.deprecations,
+            }, indent=2)[:4000]
+            + "\n```\n"
+        )
+
+    if authoritative_data.bedrock_lifecycle.models:
+        sections.append(
+            "### Bedrock Model Lifecycle\n```json\n"
+            + json.dumps([
+                {"model_name": m.model_name, "model_id": m.model_id,
+                 "status": m.status, "eol_date": m.eol_date}
+                for m in authoritative_data.bedrock_lifecycle.models
+            ], indent=2)[:4000]
+            + "\n```\n"
+        )
+
+    sections.append(
+        "\n## Instructions\n"
+        "Compare the AI model mapping guides and lifecycle file against current model data. "
+        "Use compare_models tool and web_search to verify. "
+        "Create findings for new models, deprecated models, and pricing changes. "
+        "Every finding must have source_urls."
+    )
+    return "\n".join(sections)
+
+
+def _build_guidance_prompt(
+    repo_content: RepoContent,
+    authoritative_data: AuthoritativeData,
+    run_id: str,
+) -> str:
+    """Build a focused prompt for design-ref guidance analysis only."""
+    sections: list[str] = [f"## Guidance Analysis for Run: {run_id}\n"]
+
+    # Only include design-ref files (not phases, not shared)
+    design_ref_keywords = ["design-refs/compute", "design-refs/database",
+                           "design-refs/storage", "design-refs/networking",
+                           "design-refs/messaging", "design-refs/security"]
+    for path, content in repo_content.files.items():
+        if any(kw in path for kw in design_ref_keywords):
+            sections.append(f"### File: {path}\n```\n{content[:4000]}\n```\n")
+
+    if authoritative_data.aws_docs:
+        sections.append(
+            "### AWS Documentation\n```json\n"
+            + json.dumps(authoritative_data.aws_docs, indent=2)[:6000]
+            + "\n```\n"
+        )
+
+    if authoritative_data.aws_blog_posts:
+        sections.append(
+            "### Recent AWS Blog Posts\n```json\n"
+            + json.dumps(authoritative_data.aws_blog_posts[:10], indent=2)[:3000]
+            + "\n```\n"
+        )
+
+    sections.append(
+        "\n## Instructions\n"
+        "Compare each design-ref file against current AWS best practices. "
+        "Use compare_design_ref tool and web_search to verify. "
+        "Create findings for outdated guidance. "
+        "Every finding must have source_urls."
+    )
+    return "\n".join(sections)
+
+
+def _build_new_content_prompt(
+    repo_content: RepoContent,
+    authoritative_data: AuthoritativeData,
+    run_id: str,
+) -> str:
+    """Build a focused prompt for new content opportunities only."""
+    sections: list[str] = [f"## New Content Opportunities for Run: {run_id}\n"]
+
+    # List repo file paths (not full content)
+    sections.append("### Repository Files\n")
+    for path in sorted(repo_content.files.keys()):
+        sections.append(f"- {path}")
+    sections.append("")
+
+    # Open PRs
+    if repo_content.open_prs:
+        sections.append("### Open Pull Requests\n")
+        for pr in repo_content.open_prs:
+            sections.append(f"- PR #{pr.number}: {pr.title} ({', '.join(pr.changed_files[:5])})")
+        sections.append("")
+
+    if authoritative_data.aws_whats_new:
+        sections.append(
+            "### Recent AWS What's New\n```json\n"
+            + json.dumps(authoritative_data.aws_whats_new[:10], indent=2)[:3000]
+            + "\n```\n"
+        )
+
+    sections.append(
+        "\n## Instructions\n"
+        "Check for new content opportunities about Bedrock Agents, AgentCore, "
+        "AgentCore Harness, Strands SDK, and startup migration guidance. "
+        "Use check_new_content_opportunities and web_search tools. "
+        "Only suggest content not already covered by repo files or open PRs. "
+        "Create findings for genuine gaps. Every finding must have source_urls."
+    )
+    return "\n".join(sections)
+
+
 def run_analysis(
     repo_content: RepoContent,
     authoritative_data: AuthoritativeData,
     run_id: str,
 ) -> list[Finding]:
-    """Run the Strands analysis agent on the repo content.
+    """Run focused analysis sub-tasks to avoid token limits.
 
-    The agent autonomously decides which comparisons to run and in what order,
-    using its tools to compare content and create findings.
+    Splits the analysis into 4 focused agent calls:
+    1. Pricing cache validation
+    2. AI model staleness detection
+    3. Design-ref guidance comparison
+    4. New content opportunities
 
-    Args:
-        repo_content: Snapshot of the target repo.
-        authoritative_data: Aggregated data from all authoritative sources.
-        run_id: Unique identifier for this scan run.
-
-    Returns:
-        A list of generated Findings (not yet deduplicated or reviewed).
+    Each call gets only the relevant subset of repo content and
+    authoritative data, keeping prompts within token limits.
     """
     global _current_findings, _current_run_id
 
-    # Reset module-level state for this run
     _current_findings = []
     _current_run_id = run_id
 
     agent = create_analysis_agent()
 
-    # Build the user message with all context
-    user_message = _build_analysis_prompt(repo_content, authoritative_data, run_id)
+    sub_tasks = [
+        ("pricing", _build_pricing_prompt),
+        ("models", _build_models_prompt),
+        ("guidance", _build_guidance_prompt),
+        ("new_content", _build_new_content_prompt),
+    ]
 
-    logger.info("Starting analysis agent for run %s", run_id)
-
-    # Let the agent reason and use tools
-    agent(user_message)
+    for task_name, prompt_builder in sub_tasks:
+        logger.info("Starting analysis sub-task: %s for run %s", task_name, run_id)
+        try:
+            prompt = prompt_builder(repo_content, authoritative_data, run_id)
+            agent(prompt)
+            logger.info(
+                "Sub-task %s completed: %d total findings so far",
+                task_name, len(_current_findings),
+            )
+        except Exception:
+            logger.exception("Sub-task %s failed; continuing with next", task_name)
 
     # Mark findings from partial-failure sources
     if authoritative_data.partial_failures:
         for finding in _current_findings:
-            # If the finding's category relates to a failed source, mark it
             _apply_partial_data_warnings(finding, authoritative_data.partial_failures)
 
     findings = list(_current_findings)
     logger.info(
-        "Analysis agent completed for run %s: %d findings generated",
-        run_id,
-        len(findings),
+        "Analysis completed for run %s: %d findings generated",
+        run_id, len(findings),
     )
-
     return findings
 
 
