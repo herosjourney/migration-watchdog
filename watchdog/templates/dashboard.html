@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migration Plugin Watchdog Dashboard</title>
+    <style>
+        /* ── Reset & Base ─────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+            line-height: 1.6;
+            color: #1a1a2e;
+            background: #f5f6fa;
+            padding: 1.5rem;
+        }
+
+        /* ── Header ───────────────────────────────────────────── */
+        header {
+            max-width: 1200px;
+            margin: 0 auto 1.5rem;
+        }
+
+        header h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .summary {
+            font-size: 0.95rem;
+            color: #555;
+        }
+
+        /* ── Controls bar ─────────────────────────────────────── */
+        .controls {
+            max-width: 1200px;
+            margin: 0 auto 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: flex-end;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .control-group label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #444;
+        }
+
+        .control-group select {
+            padding: 0.4rem 0.6rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background: #fff;
+            min-width: 140px;
+        }
+
+        .controls button {
+            padding: 0.45rem 1rem;
+            border: none;
+            border-radius: 4px;
+            background: #3b82f6;
+            color: #fff;
+            font-size: 0.9rem;
+            cursor: pointer;
+            align-self: flex-end;
+        }
+
+        .controls button:hover { background: #2563eb; }
+        .controls button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+        /* ── Table wrapper (responsive) ───────────────────────── */
+        .table-wrapper {
+            max-width: 1200px;
+            margin: 0 auto;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        thead th {
+            background: #f0f1f5;
+            text-align: left;
+            padding: 0.65rem 0.75rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #333;
+            white-space: nowrap;
+            border-bottom: 2px solid #ddd;
+        }
+
+        tbody td {
+            padding: 0.6rem 0.75rem;
+            font-size: 0.88rem;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+
+        tbody tr:hover { background: #fafbff; }
+
+        /* ── Badges ───────────────────────────────────────────── */
+        .badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge-low    { background: #dcfce7; color: #166534; }
+        .badge-medium { background: #fef3c7; color: #92400e; }
+        .badge-high   { background: #fee2e2; color: #991b1b; }
+
+        .review-badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .review-confirmed { background: #dcfce7; color: #166534; }
+        .review-corrected { background: #fef3c7; color: #92400e; }
+        .review-disputed  { background: #fee2e2; color: #991b1b; }
+
+        /* ── Action buttons ───────────────────────────────────── */
+        .actions {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: nowrap;
+        }
+
+        .btn {
+            padding: 0.3rem 0.7rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .btn:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+        .btn-approve { background: #22c55e; color: #fff; }
+        .btn-approve:hover { background: #16a34a; }
+
+        .btn-decline { background: #ef4444; color: #fff; }
+        .btn-decline:hover { background: #dc2626; }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ── Expandable details ───────────────────────────────── */
+        details {
+            margin-top: 0.4rem;
+            font-size: 0.82rem;
+        }
+
+        details summary {
+            cursor: pointer;
+            color: #3b82f6;
+            font-weight: 500;
+        }
+
+        details summary:hover { text-decoration: underline; }
+
+        details .detail-content {
+            margin-top: 0.3rem;
+            padding: 0.5rem;
+            background: #f9fafb;
+            border-left: 3px solid #d1d5db;
+            border-radius: 0 4px 4px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* ── Affected files list ──────────────────────────────── */
+        .file-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .file-list li {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 0.8rem;
+            color: #555;
+            padding: 0.1rem 0;
+        }
+
+        /* ── Status text ──────────────────────────────────────── */
+        .status-pending  { color: #b45309; font-weight: 600; }
+        .status-approved { color: #166534; font-weight: 600; }
+        .status-declined { color: #991b1b; font-weight: 600; }
+
+        /* ── Empty state ──────────────────────────────────────── */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #888;
+            font-size: 1rem;
+        }
+
+        /* ── Responsive ───────────────────────────────────────── */
+        @media (max-width: 768px) {
+            body { padding: 0.75rem; }
+            header h1 { font-size: 1.25rem; }
+            .controls { flex-direction: column; align-items: stretch; }
+            .control-group select { width: 100%; }
+            .controls button { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <h1>Migration Plugin Watchdog Dashboard</h1>
+        <p class="summary">Total findings: <strong id="total-count">{{ findings | length }}</strong></p>
+    </header>
+
+    <!-- Filter & Sort Controls -->
+    <form class="controls" id="controls-form" role="search" aria-label="Filter and sort findings">
+        <div class="control-group">
+            <label for="filter-risk">Risk Level</label>
+            <select id="filter-risk" name="risk_level" aria-label="Filter by risk level">
+                <option value="">All</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="filter-status">Status</label>
+            <select id="filter-status" name="status" aria-label="Filter by status">
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="declined">Declined</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="sort-by">Sort By</label>
+            <select id="sort-by" name="sort_by" aria-label="Sort by field">
+                <option value="risk_level">Risk Level</option>
+                <option value="scan_date">Scan Date</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="sort-order">Order</label>
+            <select id="sort-order" name="sort_order" aria-label="Sort order">
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+            </select>
+        </div>
+
+        <button type="submit">Apply</button>
+    </form>
+
+    <!-- Findings Table -->
+    <div class="table-wrapper">
+        {% if findings %}
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">Risk</th>
+                    <th scope="col">Review Status</th>
+                    <th scope="col">Title</th>
+                    <th scope="col">Affected Files</th>
+                    <th scope="col">Scan Date</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for finding in findings %}
+                <tr data-finding-id="{{ finding.finding_id }}">
+                    <!-- Risk Level Badge -->
+                    <td>
+                        {% if finding.risk_level == "low" %}
+                            <span class="badge badge-low" role="img" aria-label="Low risk">🟢 Low</span>
+                        {% elif finding.risk_level == "medium" %}
+                            <span class="badge badge-medium" role="img" aria-label="Medium risk">🟡 Medium</span>
+                        {% elif finding.risk_level == "high" %}
+                            <span class="badge badge-high" role="img" aria-label="High risk">🔴 High</span>
+                        {% else %}
+                            <span class="badge">{{ finding.risk_level }}</span>
+                        {% endif %}
+                    </td>
+
+                    <!-- Review Status Badge -->
+                    <td>
+                        {% if finding.review_status == "confirmed" %}
+                            <span class="review-badge review-confirmed">confirmed</span>
+                        {% elif finding.review_status == "corrected" %}
+                            <span class="review-badge review-corrected">corrected</span>
+                        {% elif finding.review_status == "disputed" %}
+                            <span class="review-badge review-disputed">disputed</span>
+                        {% elif finding.review_status %}
+                            <span class="review-badge">{{ finding.review_status }}</span>
+                        {% else %}
+                            <span aria-label="Not reviewed">&mdash;</span>
+                        {% endif %}
+                    </td>
+
+                    <!-- Title + expandable reasoning for disputed/corrected -->
+                    <td>
+                        {{ finding.title }}
+
+                        {% if finding.review_status == "disputed" %}
+                        <details>
+                            <summary>View primary &amp; review reasoning</summary>
+                            <div class="detail-content">
+                                <strong>Primary reasoning:</strong>
+                                <p>{{ finding.primary_reasoning or "N/A" }}</p>
+                                <strong>Review reasoning:</strong>
+                                <p>{{ finding.review_notes or "N/A" }}</p>
+                            </div>
+                        </details>
+                        {% endif %}
+
+                        {% if finding.review_status == "corrected" %}
+                        <details>
+                            <summary>View correction notes</summary>
+                            <div class="detail-content">{{ finding.review_notes or "N/A" }}</div>
+                        </details>
+                        {% endif %}
+                    </td>
+
+                    <!-- Affected Files -->
+                    <td>
+                        <ul class="file-list">
+                            {% for file in finding.affected_files %}
+                            <li>{{ file }}</li>
+                            {% endfor %}
+                        </ul>
+                    </td>
+
+                    <!-- Scan Date -->
+                    <td>{{ finding.scan_date or finding.scan_timestamp or "&mdash;" }}</td>
+
+                    <!-- Status -->
+                    <td>
+                        <span class="status-{{ finding.status }}">{{ finding.status }}</span>
+                    </td>
+
+                    <!-- Actions -->
+                    <td>
+                        {% if finding.status == "pending" %}
+                        <div class="actions">
+                            <button
+                                class="btn btn-approve"
+                                type="button"
+                                onclick="approveFinding('{{ finding.finding_id }}')"
+                                aria-label="Approve finding: {{ finding.title }}"
+                            >Approve</button>
+                            <button
+                                class="btn btn-decline"
+                                type="button"
+                                onclick="declineFinding('{{ finding.finding_id }}')"
+                                aria-label="Decline finding: {{ finding.title }}"
+                            >Decline</button>
+                        </div>
+                        {% elif finding.status == "approved" and finding.pr_url %}
+                        <a href="{{ finding.pr_url }}" target="_blank" rel="noopener noreferrer">View PR</a>
+                        {% else %}
+                        <span aria-label="No actions available">&mdash;</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state" role="status">
+            <p>No findings to display.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- JavaScript for approve/decline API calls and filter/sort -->
+    <script>
+        /**
+         * POST to the approve endpoint for a finding, then reload the page.
+         * @param {string} findingId - The finding UUID.
+         */
+        async function approveFinding(findingId) {
+            const btn = event.currentTarget;
+            btn.disabled = true;
+            btn.textContent = "Approving…";
+
+            try {
+                const resp = await fetch("/api/findings/" + encodeURIComponent(findingId) + "/approve", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" }
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    alert("Error: " + (data.detail || JSON.stringify(data)));
+                    btn.disabled = false;
+                    btn.textContent = "Approve";
+                    return;
+                }
+
+                if (data.pr_url) {
+                    alert("PR created: " + data.pr_url);
+                } else {
+                    alert("Finding approved.");
+                }
+                location.reload();
+            } catch (err) {
+                alert("Network error: " + err.message);
+                btn.disabled = false;
+                btn.textContent = "Approve";
+            }
+        }
+
+        /**
+         * POST to the decline endpoint for a finding, then reload the page.
+         * @param {string} findingId - The finding UUID.
+         */
+        async function declineFinding(findingId) {
+            const btn = event.currentTarget;
+            btn.disabled = true;
+            btn.textContent = "Declining…";
+
+            try {
+                const resp = await fetch("/api/findings/" + encodeURIComponent(findingId) + "/decline", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" }
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    alert("Error: " + (data.detail || JSON.stringify(data)));
+                    btn.disabled = false;
+                    btn.textContent = "Decline";
+                    return;
+                }
+
+                alert("Finding declined.");
+                location.reload();
+            } catch (err) {
+                alert("Network error: " + err.message);
+                btn.disabled = false;
+                btn.textContent = "Decline";
+            }
+        }
+
+        /**
+         * Handle filter/sort form submission via client-side URL navigation.
+         */
+        document.getElementById("controls-form").addEventListener("submit", function (e) {
+            e.preventDefault();
+            var params = new URLSearchParams();
+            var risk = document.getElementById("filter-risk").value;
+            var status = document.getElementById("filter-status").value;
+            var sortBy = document.getElementById("sort-by").value;
+            var sortOrder = document.getElementById("sort-order").value;
+
+            if (risk) params.set("risk_level", risk);
+            if (status) params.set("status", status);
+            if (sortBy) params.set("sort_by", sortBy);
+            if (sortOrder) params.set("sort_order", sortOrder);
+
+            var qs = params.toString();
+            window.location.href = "/dashboard" + (qs ? "?" + qs : "");
+        });
+
+        /**
+         * On page load, restore control values from URL query parameters.
+         */
+        (function restoreControls() {
+            var params = new URLSearchParams(window.location.search);
+            var fields = ["risk_level", "status", "sort_by", "sort_order"];
+            var ids    = ["filter-risk", "filter-status", "sort-by", "sort-order"];
+            for (var i = 0; i < fields.length; i++) {
+                var val = params.get(fields[i]);
+                if (val) {
+                    var el = document.getElementById(ids[i]);
+                    if (el) el.value = val;
+                }
+            }
+        })();
+    </script>
+</body>
+</html>

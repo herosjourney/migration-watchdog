@@ -1,0 +1,304 @@
+"""Strands-based refactoring assessment agent using Claude Opus 4.7.
+
+Evaluates whether the target repo's plugin structure warrants refactoring
+based on current scan results, accumulated findings history, and repo
+structure. Generates high-risk findings with advantages, disadvantages,
+and proposed structure.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime
+from uuid import uuid4
+
+from strands import Agent, tool
+from strands.models.bedrock import BedrockModel
+
+from watchdog.models import (
+    Finding,
+    RepoContent,
+    RiskLevel,
+    classify_risk,
+)
+
+logger = logging.getLogger(__name__)
+
+# Module-level state that the create_refactoring_finding tool writes to
+# during a run. Reset at the start of each run_refactoring_assessment() call.
+_refactoring_finding: Finding | None = None
+_current_run_id: str = ""
+
+# ---------------------------------------------------------------------------
+# Strands @tool functions
+# ---------------------------------------------------------------------------
+
+
+@tool
+def analyze_repo_structure(repo_files_json: str, findings_history_json: str) -> str:
+    """Analyze the repo structure and accumulated findings to assess refactoring needs.
+
+    Args:
+        repo_files_json: JSON string of repo file paths and sizes
+        findings_history_json: JSON string of historical findings
+
+    Returns:
+        JSON string with analysis results (file count, structure, patterns in findings)
+    """
+    try:
+        repo_files: dict[str, str] = json.loads(repo_files_json)
+    except (json.JSONDecodeError, TypeError):
+        repo_files = {}
+
+    try:
+        findings_history: list[dict] = json.loads(findings_history_json)
+    except (json.JSONDecodeError, TypeError):
+        findings_history = []
+
+    # Compute structural metrics
+    file_count = len(repo_files)
+    total_size = sum(len(content) for content in repo_files.values())
+
+    # Analyze directory structure
+    directories: dict[str, int] = {}
+    for path in repo_files:
+        parts = path.rsplit("/", 1)
+        directory = parts[0] if len(parts) > 1 else "."
+        directories[directory] = directories.get(directory, 0) + 1
+
+    # Analyze findings patterns — which categories and files are repeatedly flagged
+    category_counts: dict[str, int] = {}
+    affected_file_counts: dict[str, int] = {}
+    for finding in findings_history:
+        cat = finding.get("category", "unknown")
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+        for f in finding.get("affected_files", []):
+            affected_file_counts[f] = affected_file_counts.get(f, 0) + 1
+
+    # Identify repeatedly flagged files (flagged more than once)
+    repeatedly_flagged = {
+        f: count for f, count in affected_file_counts.items() if count > 1
+    }
+
+    return json.dumps(
+        {
+            "file_count": file_count,
+            "total_content_size": total_size,
+            "directories": directories,
+            "findings_history_count": len(findings_history),
+            "category_counts": category_counts,
+            "repeatedly_flagged_files": repeatedly_flagged,
+            "affected_file_counts": affected_file_counts,
+        }
+    )
+
+
+@tool
+def create_refactoring_finding(
+    advantages: str, disadvantages: str, proposed_structure: str
+) -> str:
+    """Create a high-risk refactoring Finding.
+
+    Auto-classifies as HIGH risk (category="refactoring").
+
+    Args:
+        advantages: Description of refactoring advantages
+        disadvantages: Description of refactoring disadvantages
+        proposed_structure: Description of what the refactored structure would look like
+
+    Returns:
+        JSON string of the created Finding
+    """
+    global _refactoring_finding, _current_run_id
+
+    risk_level = classify_risk("refactoring")
+    finding_id = str(uuid4())
+    scan_timestamp = datetime.utcnow().isoformat()
+
+    description = (
+        f"**Advantages:**\n{advantages}\n\n"
+        f"**Disadvantages:**\n{disadvantages}\n\n"
+        f"**Proposed Structure:**\n{proposed_structure}"
+    )
+
+    finding = Finding(
+        finding_id=finding_id,
+        run_id=_current_run_id,
+        risk_level=risk_level,
+        category="refactoring",
+        title="Plugin Structure Refactoring Assessment",
+        description=description,
+        affected_files=[],
+        proposed_changes={},
+        source_urls=[],
+        scan_timestamp=scan_timestamp,
+        status="pending",
+    )
+
+    _refactoring_finding = finding
+
+    return json.dumps(
+        {
+            "created": True,
+            "finding_id": finding_id,
+            "risk_level": risk_level.value,
+            "category": "refactoring",
+            "title": finding.title,
+            "advantages": advantages,
+            "disadvantages": disadvantages,
+            "proposed_structure": proposed_structure,
+            "scan_timestamp": scan_timestamp,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# System prompt
+# ---------------------------------------------------------------------------
+
+REFACTORING_SYSTEM_PROMPT = """You are the Migration Plugin Watchdog Refactoring Assessor. \
+Your job is to evaluate whether the plugin's structure warrants refactoring.
+
+Consider:
+- File organization and naming conventions
+- Content duplication across files
+- Accumulated findings patterns (are the same areas repeatedly flagged?)
+- Whether the current structure supports easy updates
+- Whether new content areas (AgentCore, Strands SDK) fit naturally
+
+If you identify a refactoring opportunity, create a finding with:
+- Clear advantages of the refactoring
+- Clear disadvantages and risks
+- A concrete description of what the new structure would look like
+
+Only suggest refactoring when there's a genuine structural improvement. \
+Don't suggest changes for the sake of change."""
+
+
+# ---------------------------------------------------------------------------
+# Agent factory
+# ---------------------------------------------------------------------------
+
+
+def create_refactoring_agent() -> Agent:
+    """Create the Strands refactoring assessment agent with Claude Opus 4.7."""
+    model = BedrockModel(
+        model_id="anthropic.claude-opus-4-7",
+        region_name="us-east-1",
+    )
+    return Agent(
+        model=model,
+        system_prompt=REFACTORING_SYSTEM_PROMPT,
+        tools=[analyze_repo_structure, create_refactoring_finding],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Run refactoring assessment
+# ---------------------------------------------------------------------------
+
+
+def _build_refactoring_prompt(
+    repo_content: RepoContent,
+    existing_findings: list[Finding],
+    run_id: str,
+) -> str:
+    """Build the user message with repo structure and findings history."""
+    sections: list[str] = []
+
+    sections.append(f"## Refactoring Assessment for Run: {run_id}\n")
+
+    # Repo structure summary
+    sections.append("## Repository Structure\n")
+    repo_files_summary: dict[str, str] = {}
+    for path, content in repo_content.files.items():
+        repo_files_summary[path] = f"{len(content)} chars"
+    sections.append(
+        "```json\n"
+        + json.dumps(repo_files_summary, indent=2)
+        + "\n```\n"
+    )
+
+    # Findings history
+    sections.append("## Accumulated Findings History\n")
+    findings_data = [
+        {
+            "finding_id": f.finding_id,
+            "category": f.category,
+            "title": f.title,
+            "affected_files": f.affected_files,
+            "risk_level": f.risk_level.value if isinstance(f.risk_level, RiskLevel) else f.risk_level,
+            "status": f.status,
+            "scan_timestamp": f.scan_timestamp,
+        }
+        for f in existing_findings
+    ]
+    sections.append(
+        "```json\n"
+        + json.dumps(findings_data, indent=2)
+        + "\n```\n"
+    )
+
+    sections.append(
+        "\n## Instructions\n"
+        "Please analyze the repository structure and accumulated findings history "
+        "using the analyze_repo_structure tool. Based on the analysis, determine "
+        "whether the plugin's structure warrants refactoring. If you identify a "
+        "genuine structural improvement, use the create_refactoring_finding tool "
+        "to create a finding with clear advantages, disadvantages, and a proposed "
+        "new structure. If no refactoring is warranted, simply explain why the "
+        "current structure is adequate."
+    )
+
+    return "\n".join(sections)
+
+
+def run_refactoring_assessment(
+    repo_content: RepoContent,
+    existing_findings: list[Finding],
+    run_id: str,
+) -> Finding | None:
+    """Run the refactoring assessment agent.
+
+    Builds a prompt with repo structure and findings history, runs the
+    Strands agent, and returns the refactoring Finding if one was created,
+    or None if no refactoring is warranted.
+
+    Args:
+        repo_content: Snapshot of the target repo.
+        existing_findings: Previously generated findings from this and past runs.
+        run_id: Unique identifier for this scan run.
+
+    Returns:
+        A refactoring Finding if the agent recommends refactoring, else None.
+    """
+    global _refactoring_finding, _current_run_id
+
+    # Reset module-level state for this run
+    _refactoring_finding = None
+    _current_run_id = run_id
+
+    agent = create_refactoring_agent()
+
+    # Build the user message with repo structure and findings history
+    user_message = _build_refactoring_prompt(repo_content, existing_findings, run_id)
+
+    logger.info("Starting refactoring assessment agent for run %s", run_id)
+
+    # Let the agent reason and use tools
+    agent(user_message)
+
+    if _refactoring_finding is not None:
+        logger.info(
+            "Refactoring assessment for run %s: finding created (id=%s)",
+            run_id,
+            _refactoring_finding.finding_id,
+        )
+    else:
+        logger.info(
+            "Refactoring assessment for run %s: no refactoring warranted",
+            run_id,
+        )
+
+    return _refactoring_finding

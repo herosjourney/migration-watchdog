@@ -1,0 +1,684 @@
+"""Strands-based analysis agent using Claude Opus 4.7.
+
+Implements the primary LLM agent that compares repo content against
+authoritative sources, identifies discrepancies, classifies risk levels,
+and generates findings with source citations.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime
+from uuid import uuid4
+
+import httpx
+from strands import Agent, tool
+from strands.models.bedrock import BedrockModel
+
+from watchdog.models import (
+    AuthoritativeData,
+    Finding,
+    ModelStalenessResult,
+    RepoContent,
+    classify_risk,
+)
+from watchdog.pricing_comparator import compare_pricing_entries, parse_pricing_cache
+from watchdog.model_comparator import (
+    compare_model_lifecycle,
+    compare_model_lists,
+    compare_model_pricing,
+)
+
+logger = logging.getLogger(__name__)
+
+# Module-level list that the create_finding tool appends to during a run.
+# Reset at the start of each run_analysis() call.
+_current_findings: list[Finding] = []
+_current_run_id: str = ""
+
+# ---------------------------------------------------------------------------
+# Strands @tool functions
+# ---------------------------------------------------------------------------
+
+
+@tool
+def compare_pricing(repo_pricing_md: str, current_pricing_json: str) -> str:
+    """Compare the repo's pricing-cache.md content against current pricing data.
+
+    Extracts prices from the markdown, compares against current data,
+    flags differences exceeding tolerance (±5-10% infra, ±15-25% AI).
+    Also checks last-updated date (>30 days = stale).
+
+    Args:
+        repo_pricing_md: Raw markdown content of pricing-cache.md
+        current_pricing_json: JSON string of current pricing data from AWS/providers
+
+    Returns:
+        JSON string of PricingValidationResult with entries and staleness info
+    """
+    cached_entries = parse_pricing_cache(repo_pricing_md)
+    current_prices: dict[str, dict[str, float]] = json.loads(current_pricing_json)
+    result = compare_pricing_entries(cached_entries, current_prices)
+
+    return json.dumps(
+        {
+            "entries": [
+                {
+                    "service": e.service,
+                    "metric": e.metric,
+                    "cached_value": e.cached_value,
+                    "current_value": e.current_value,
+                    "difference_pct": e.difference_pct,
+                    "tolerance_pct": e.tolerance_pct,
+                    "exceeds_tolerance": e.exceeds_tolerance,
+                }
+                for e in result.entries
+            ],
+            "stale_date": result.stale_date,
+            "cache_last_updated": result.cache_last_updated,
+            "validation_timestamp": result.validation_timestamp,
+        }
+    )
+
+
+
+@tool
+def compare_models(repo_model_md: str, provider: str, current_models_json: str) -> str:
+    """Compare a model mapping guide against current model/pricing data.
+
+    Args:
+        repo_model_md: Raw markdown content of ai-gemini-to-bedrock.md or ai-openai-to-bedrock.md
+        provider: "gemini" or "openai"
+        current_models_json: JSON string of current model data from provider
+
+    Returns:
+        JSON string of ModelStalenessResult with changes detected
+    """
+    current_data = json.loads(current_models_json)
+
+    # Extract model names from the repo markdown (simple heuristic: lines
+    # that look like table rows with model identifiers).
+    repo_model_names: set[str] = set()
+    for line in repo_model_md.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|") and "---" not in stripped:
+            cells = [c.strip() for c in stripped.split("|") if c.strip()]
+            if cells:
+                repo_model_names.add(cells[0])
+
+    current_model_names: set[str] = set(current_data.get("models", []))
+    added, removed = compare_model_lists(repo_model_names, current_model_names)
+
+    # Lifecycle comparison if lifecycle entries are provided
+    from watchdog.models import ModelLifecycleEntry
+
+    repo_lifecycle = [
+        ModelLifecycleEntry(
+            model_name=e.get("model_name", ""),
+            model_id=e.get("model_id", ""),
+            status=e.get("status", "active"),
+            eol_date=e.get("eol_date"),
+            replacement=e.get("replacement"),
+        )
+        for e in current_data.get("repo_lifecycle", [])
+    ]
+    current_lifecycle = [
+        ModelLifecycleEntry(
+            model_name=e.get("model_name", ""),
+            model_id=e.get("model_id", ""),
+            status=e.get("status", "active"),
+            eol_date=e.get("eol_date"),
+            replacement=e.get("replacement"),
+        )
+        for e in current_data.get("current_lifecycle", [])
+    ]
+    lifecycle_changes = compare_model_lifecycle(repo_lifecycle, current_lifecycle)
+
+    # Pricing comparison if pricing data is provided
+    repo_pricing: dict[str, dict] = current_data.get("repo_pricing", {})
+    current_pricing: dict[str, dict] = current_data.get("current_pricing", {})
+    pricing_changes = compare_model_pricing(repo_pricing, current_pricing)
+
+    result = ModelStalenessResult(
+        gemini_changes=(lifecycle_changes + pricing_changes) if provider == "gemini" else [],
+        openai_changes=(lifecycle_changes + pricing_changes) if provider == "openai" else [],
+        bedrock_lifecycle_changes=[],
+        scan_timestamp=datetime.utcnow().isoformat(),
+    )
+
+    return json.dumps(
+        {
+            "provider": provider,
+            "added_models": sorted(added),
+            "removed_models": sorted(removed),
+            "lifecycle_changes": [
+                {
+                    "model_name": c.model_name,
+                    "repo_status": c.repo_status,
+                    "current_status": c.current_status,
+                    "change_type": c.change_type,
+                }
+                for c in lifecycle_changes
+            ],
+            "pricing_changes": [
+                {
+                    "model_name": c.model_name,
+                    "repo_pricing": c.repo_pricing,
+                    "current_pricing": c.current_pricing,
+                    "change_type": c.change_type,
+                }
+                for c in pricing_changes
+            ],
+            "scan_timestamp": result.scan_timestamp,
+        }
+    )
+
+
+@tool
+def compare_design_ref(
+    repo_content: str, file_path: str, aws_docs_json: str, recent_posts_json: str
+) -> str:
+    """Compare a design-ref file against current AWS best practices.
+
+    This is a pass-through that structures the data for the LLM to reason
+    about. The LLM will use the returned data to identify discrepancies
+    between the repo content and current authoritative sources.
+
+    Args:
+        repo_content: Raw markdown content of the design-ref file
+        file_path: Path of the file being compared (e.g., "compute.md")
+        aws_docs_json: JSON string of relevant AWS documentation content
+        recent_posts_json: JSON string of relevant blog posts and What's New entries
+
+    Returns:
+        JSON string of comparison results (discrepancies found)
+    """
+    aws_docs = json.loads(aws_docs_json) if aws_docs_json else {}
+    recent_posts = json.loads(recent_posts_json) if recent_posts_json else []
+
+    return json.dumps(
+        {
+            "file_path": file_path,
+            "repo_content_length": len(repo_content),
+            "repo_content_preview": repo_content[:2000],
+            "aws_docs_topics": list(aws_docs.keys()) if isinstance(aws_docs, dict) else [],
+            "aws_docs": aws_docs,
+            "recent_posts_count": len(recent_posts),
+            "recent_posts": recent_posts,
+        }
+    )
+
+
+@tool
+def check_new_content_opportunities(
+    repo_files_json: str, open_prs_json: str, recent_updates_json: str
+) -> str:
+    """Check for proactive content suggestions (Bedrock Agents, AgentCore,
+    Strands SDK, startup migration guidance).
+
+    First checks repo content and open PRs for existing coverage to avoid
+    duplicates.
+
+    Args:
+        repo_files_json: JSON string of repo file paths and content
+        open_prs_json: JSON string of open PR titles and changed files
+        recent_updates_json: JSON string of recent AWS updates on agent tooling
+
+    Returns:
+        JSON string of opportunities found
+    """
+    repo_files: dict[str, str] = json.loads(repo_files_json)
+    open_prs: list[dict] = json.loads(open_prs_json)
+    recent_updates: list[dict] = json.loads(recent_updates_json)
+
+    # Keywords for topics we want to check coverage for
+    topic_keywords = {
+        "bedrock_agents": ["bedrock agents", "bedrock agent"],
+        "agentcore": ["agentcore", "agent core"],
+        "strands_sdk": ["strands sdk", "strands-agents", "strands agent"],
+        "startup_migration": ["startup migration", "startup agentic"],
+    }
+
+    opportunities: list[dict] = []
+
+    for topic_id, keywords in topic_keywords.items():
+        # Check if repo already covers this topic
+        covered_in_repo = False
+        for _path, content in repo_files.items():
+            content_lower = content.lower()
+            if any(kw in content_lower for kw in keywords):
+                covered_in_repo = True
+                break
+
+        # Check if an open PR already addresses this topic
+        covered_in_pr = False
+        for pr in open_prs:
+            pr_text = (pr.get("title", "") + " " + pr.get("body", "")).lower()
+            if any(kw in pr_text for kw in keywords):
+                covered_in_pr = True
+                break
+
+        # Check if there are recent updates about this topic
+        relevant_updates = []
+        for update in recent_updates:
+            update_text = (
+                update.get("title", "") + " " + update.get("content", "")
+            ).lower()
+            if any(kw in update_text for kw in keywords):
+                relevant_updates.append(update)
+
+        if relevant_updates and not covered_in_repo and not covered_in_pr:
+            opportunities.append(
+                {
+                    "topic": topic_id,
+                    "keywords": keywords,
+                    "relevant_updates": relevant_updates,
+                    "covered_in_repo": covered_in_repo,
+                    "covered_in_pr": covered_in_pr,
+                }
+            )
+
+    return json.dumps({"opportunities": opportunities})
+
+
+@tool
+def web_search(query: str) -> str:
+    """Search the web for current information to verify claims or find updates.
+
+    Use this tool when pre-fetched authoritative data is insufficient to
+    confirm or deny a discrepancy. Always prefer pre-fetched data first;
+    use web search only to fill gaps or verify uncertain claims.
+
+    Args:
+        query: Search query string (e.g., "AWS ECS Fargate pricing 2026",
+               "Bedrock AgentCore latest features")
+
+    Returns:
+        JSON string of search results with titles, URLs, and snippets
+    """
+    try:
+        # Use DuckDuckGo HTML search as a simple web search approach
+        url = "https://html.duckduckgo.com/html/"
+        with httpx.Client(timeout=15.0) as client:
+            response = client.post(
+                url,
+                data={"q": query},
+                headers={"User-Agent": "MigrationPluginWatchdog/1.0"},
+            )
+            response.raise_for_status()
+
+        # Parse basic results from the HTML response
+        results: list[dict] = []
+        html = response.text
+        # Simple extraction of result snippets from DuckDuckGo HTML
+        import re
+
+        # Find result blocks
+        result_blocks = re.findall(
+            r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
+            r'class="result__snippet"[^>]*>(.*?)</span>',
+            html,
+            re.DOTALL,
+        )
+        for href, title_html, snippet_html in result_blocks[:5]:
+            # Strip HTML tags
+            title = re.sub(r"<[^>]+>", "", title_html).strip()
+            snippet = re.sub(r"<[^>]+>", "", snippet_html).strip()
+            results.append(
+                {"title": title, "url": href, "snippet": snippet}
+            )
+
+        return json.dumps({"query": query, "results": results})
+    except Exception as exc:
+        logger.warning("Web search failed for query '%s': %s", query, exc)
+        return json.dumps(
+            {
+                "query": query,
+                "results": [],
+                "error": f"Search failed: {exc}",
+            }
+        )
+
+
+@tool
+def create_finding(
+    category: str,
+    title: str,
+    description: str,
+    affected_files: str,
+    proposed_changes: str,
+    source_urls: str,
+) -> str:
+    """Create a structured Finding from a detected discrepancy.
+
+    Automatically classifies risk level based on category.
+    Validates that source_urls is non-empty; rejects findings without citations.
+
+    Args:
+        category: One of "pricing", "model_deprecation", "new_model",
+                  "guidance_update", "new_content", "structural",
+                  "core_removal", "refactoring"
+        title: Short descriptive title for the finding
+        description: Detailed description of the discrepancy
+        affected_files: JSON array of affected file paths
+        proposed_changes: JSON object mapping file_path -> proposed new content
+        source_urls: JSON array of authoritative source URLs
+
+    Returns:
+        JSON string of the created Finding with finding_id and risk_level
+    """
+    global _current_findings, _current_run_id
+
+    # Parse JSON string arguments
+    try:
+        files_list: list[str] = json.loads(affected_files)
+    except (json.JSONDecodeError, TypeError):
+        files_list = [affected_files] if affected_files else []
+
+    try:
+        changes_dict: dict[str, str] = json.loads(proposed_changes)
+    except (json.JSONDecodeError, TypeError):
+        changes_dict = {}
+
+    try:
+        urls_list: list[str] = json.loads(source_urls)
+    except (json.JSONDecodeError, TypeError):
+        urls_list = [source_urls] if source_urls else []
+
+    # Validate source_urls is non-empty — reject findings without citations
+    if not urls_list:
+        return json.dumps(
+            {
+                "error": "Finding rejected: source_urls must be non-empty. "
+                "Every finding must have at least one authoritative source URL.",
+                "created": False,
+            }
+        )
+
+    risk_level = classify_risk(category)
+    finding_id = str(uuid4())
+    scan_timestamp = datetime.utcnow().isoformat()
+
+    finding = Finding(
+        finding_id=finding_id,
+        run_id=_current_run_id,
+        risk_level=risk_level,
+        category=category,
+        title=title,
+        description=description,
+        affected_files=files_list,
+        proposed_changes=changes_dict,
+        source_urls=urls_list,
+        scan_timestamp=scan_timestamp,
+        status="pending",
+    )
+
+    _current_findings.append(finding)
+
+    return json.dumps(
+        {
+            "created": True,
+            "finding_id": finding_id,
+            "risk_level": risk_level.value,
+            "category": category,
+            "title": title,
+            "scan_timestamp": scan_timestamp,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# System prompt
+# ---------------------------------------------------------------------------
+
+ANALYSIS_SYSTEM_PROMPT = """You are the Migration Plugin Watchdog Analysis Agent. Your job is to \
+compare the contents of the aws-samples/sample-agent-skills-for-aws-migration GitHub repository \
+against current authoritative sources and identify outdated, stale, or missing content.
+
+You will be given:
+1. The current repo content (markdown files from the migration plugin)
+2. Current authoritative data (AWS docs, pricing, Gemini/OpenAI model data, blog posts)
+
+Your tasks:
+- Compare pricing-cache.md against current AWS/provider pricing using the compare_pricing tool
+- Compare AI model mapping guides against current model data using the compare_models tool
+- Compare each design-ref file against current AWS best practices using the compare_design_ref tool
+- Check for new content opportunities (Bedrock Agents, AgentCore, Strands SDK, startup migration) \
+using the check_new_content_opportunities tool
+- Use the web_search tool to verify claims or find current information when pre-fetched data \
+is insufficient
+- For each discrepancy found, create a Finding using the create_finding tool
+
+CRITICAL GROUNDING RULES:
+- ONLY flag discrepancies you can support with data from the tools (pre-fetched authoritative \
+data or web search results). Do NOT use your training knowledge as a source of truth.
+- Every finding MUST include at least one source_url pointing to the authoritative data that \
+supports the discrepancy. If you cannot cite a source, do NOT create the finding.
+- If no authoritative data was fetched for a topic and web search returns no relevant results, \
+SKIP that topic entirely rather than guessing from training data.
+- When in doubt, use the web_search tool to verify before creating a finding.
+- Be thorough but precise. Only create findings for genuine discrepancies backed by cited data."""
+
+
+# ---------------------------------------------------------------------------
+# Agent factory
+# ---------------------------------------------------------------------------
+
+
+def create_analysis_agent() -> Agent:
+    """Create the Strands analysis agent with Claude Opus 4.7."""
+    model = BedrockModel(
+        model_id="anthropic.claude-opus-4-7",
+        region_name="us-east-1",
+    )
+    return Agent(
+        model=model,
+        system_prompt=ANALYSIS_SYSTEM_PROMPT,
+        tools=[
+            compare_pricing,
+            compare_models,
+            compare_design_ref,
+            check_new_content_opportunities,
+            web_search,
+            create_finding,
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Run analysis
+# ---------------------------------------------------------------------------
+
+
+def _build_analysis_prompt(
+    repo_content: RepoContent,
+    authoritative_data: AuthoritativeData,
+    run_id: str,
+) -> str:
+    """Build the user message with all context for the analysis agent."""
+    sections: list[str] = []
+
+    sections.append(f"## Scan Run: {run_id}\n")
+
+    # Repo content
+    sections.append("## Repository Content\n")
+    for path, content in repo_content.files.items():
+        sections.append(f"### File: {path}\n```\n{content}\n```\n")
+
+    # Open PRs
+    if repo_content.open_prs:
+        sections.append("## Open Pull Requests\n")
+        for pr in repo_content.open_prs:
+            sections.append(
+                f"- PR #{pr.number}: {pr.title} (by {pr.author})\n"
+                f"  Changed files: {', '.join(pr.changed_files)}\n"
+            )
+
+    # Authoritative data
+    sections.append("## Authoritative Data\n")
+
+    if authoritative_data.aws_pricing:
+        sections.append(
+            "### Current AWS Pricing\n```json\n"
+            + json.dumps(authoritative_data.aws_pricing, indent=2)
+            + "\n```\n"
+        )
+
+    if authoritative_data.gemini_models.models or authoritative_data.gemini_models.pricing:
+        sections.append(
+            "### Gemini Model Data\n```json\n"
+            + json.dumps(
+                {
+                    "models": authoritative_data.gemini_models.models,
+                    "pricing": authoritative_data.gemini_models.pricing,
+                    "deprecations": authoritative_data.gemini_models.deprecations,
+                },
+                indent=2,
+            )
+            + "\n```\n"
+        )
+
+    if authoritative_data.openai_models.pricing:
+        sections.append(
+            "### OpenAI Model Data\n```json\n"
+            + json.dumps(
+                {
+                    "pricing": authoritative_data.openai_models.pricing,
+                    "deprecations": authoritative_data.openai_models.deprecations,
+                },
+                indent=2,
+            )
+            + "\n```\n"
+        )
+
+    if authoritative_data.bedrock_lifecycle.models:
+        sections.append(
+            "### Bedrock Model Lifecycle\n```json\n"
+            + json.dumps(
+                [
+                    {
+                        "model_name": m.model_name,
+                        "model_id": m.model_id,
+                        "status": m.status,
+                        "eol_date": m.eol_date,
+                        "replacement": m.replacement,
+                    }
+                    for m in authoritative_data.bedrock_lifecycle.models
+                ],
+                indent=2,
+            )
+            + "\n```\n"
+        )
+
+    if authoritative_data.aws_docs:
+        sections.append(
+            "### AWS Documentation\n```json\n"
+            + json.dumps(authoritative_data.aws_docs, indent=2)
+            + "\n```\n"
+        )
+
+    if authoritative_data.aws_blog_posts:
+        sections.append(
+            "### Recent AWS Blog Posts\n```json\n"
+            + json.dumps(authoritative_data.aws_blog_posts, indent=2)
+            + "\n```\n"
+        )
+
+    if authoritative_data.aws_whats_new:
+        sections.append(
+            "### Recent AWS What's New\n```json\n"
+            + json.dumps(authoritative_data.aws_whats_new, indent=2)
+            + "\n```\n"
+        )
+
+    if authoritative_data.partial_failures:
+        sections.append(
+            "### ⚠️ Partial Source Failures\n"
+            "The following sources could not be fetched and should be noted "
+            "when creating findings:\n"
+            + "\n".join(f"- {s}" for s in authoritative_data.partial_failures)
+            + "\n"
+        )
+
+    sections.append(
+        "\n## Instructions\n"
+        "Please analyze the repository content against the authoritative data above. "
+        "Use the provided tools to compare pricing, models, design references, and "
+        "check for new content opportunities. Create findings for any discrepancies "
+        "you identify, ensuring each finding has proper source citations."
+    )
+
+    return "\n".join(sections)
+
+
+def run_analysis(
+    repo_content: RepoContent,
+    authoritative_data: AuthoritativeData,
+    run_id: str,
+) -> list[Finding]:
+    """Run the Strands analysis agent on the repo content.
+
+    The agent autonomously decides which comparisons to run and in what order,
+    using its tools to compare content and create findings.
+
+    Args:
+        repo_content: Snapshot of the target repo.
+        authoritative_data: Aggregated data from all authoritative sources.
+        run_id: Unique identifier for this scan run.
+
+    Returns:
+        A list of generated Findings (not yet deduplicated or reviewed).
+    """
+    global _current_findings, _current_run_id
+
+    # Reset module-level state for this run
+    _current_findings = []
+    _current_run_id = run_id
+
+    agent = create_analysis_agent()
+
+    # Build the user message with all context
+    user_message = _build_analysis_prompt(repo_content, authoritative_data, run_id)
+
+    logger.info("Starting analysis agent for run %s", run_id)
+
+    # Let the agent reason and use tools
+    agent(user_message)
+
+    # Mark findings from partial-failure sources
+    if authoritative_data.partial_failures:
+        for finding in _current_findings:
+            # If the finding's category relates to a failed source, mark it
+            _apply_partial_data_warnings(finding, authoritative_data.partial_failures)
+
+    findings = list(_current_findings)
+    logger.info(
+        "Analysis agent completed for run %s: %d findings generated",
+        run_id,
+        len(findings),
+    )
+
+    return findings
+
+
+def _apply_partial_data_warnings(
+    finding: Finding, partial_failures: list[str]
+) -> None:
+    """Set partial_data_warning on a finding if it depends on a failed source."""
+    # Map categories to source names that they depend on
+    category_source_map: dict[str, list[str]] = {
+        "pricing": ["aws_pricing", "gemini", "openai"],
+        "model_deprecation": ["gemini", "openai", "bedrock_lifecycle"],
+        "new_model": ["gemini", "openai", "bedrock_lifecycle"],
+        "guidance_update": ["aws_docs", "aws_blogs"],
+        "new_content": ["aws_blogs", "aws_whats_new"],
+        "structural": ["aws_docs"],
+    }
+
+    dependent_sources = category_source_map.get(finding.category, [])
+    for source in partial_failures:
+        source_lower = source.lower()
+        if any(dep in source_lower for dep in dependent_sources):
+            finding.partial_data_warning = True
+            return
