@@ -234,6 +234,7 @@ async def dashboard_page():
     """
     repo = _get_findings_repository()
     findings = repo.list_findings(exclude_dismissed=True)
+    findings = [f for f in findings if f.status not in ("superseded", "declined")]
     findings = _sort_findings(findings, sort_by="risk_level", sort_order="desc")
 
     findings_data = [_finding_to_dict(f) for f in findings]

@@ -126,6 +126,24 @@ async def run_scan() -> None:
         for finding in reviewed_findings:
             findings_repo.save_finding(finding)
 
+        # 7a. Clean up existing findings now covered by open PRs
+        logger.info("Checking existing findings against open PRs …")
+        all_pending = findings_repo.list_findings(status="pending", exclude_dismissed=True)
+        from migration_watchdog.finding_deduplicator import _is_addressed_by_pr
+        cleaned = 0
+        for existing in all_pending:
+            for pr in repo_content.open_prs:
+                if _is_addressed_by_pr(existing, pr):
+                    findings_repo.update_finding_status(existing.finding_id, "superseded")
+                    cleaned += 1
+                    logger.info(
+                        "Finding %s superseded by PR #%d: %s",
+                        existing.finding_id, pr.number, pr.title,
+                    )
+                    break
+        if cleaned:
+            logger.info("Cleaned up %d findings now covered by open PRs", cleaned)
+
         # 8. Run refactoring assessment
         logger.info("Running refactoring assessment …")
         refactoring_finding = run_refactoring_assessment(
