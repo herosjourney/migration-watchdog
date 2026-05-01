@@ -201,7 +201,7 @@ REVIEW_SYSTEM_PROMPT = (
 def create_review_agent() -> Agent:
     """Create the Strands review agent with Nova 2 Pro."""
     model = BedrockModel(
-        model_id="amazon.nova-2-pro",
+        model_id="us.amazon.nova-2-pro-v1:0",
         region_name="us-east-1",
     )
     return Agent(
