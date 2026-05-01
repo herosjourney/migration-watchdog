@@ -20,6 +20,9 @@ from migration_watchdog.retry import retry_with_backoff
 # Path prefix for markdown files to scan in the target repo.
 REFERENCES_PATH = "features/migration-to-aws/skills/gcp-to-aws/references"
 
+# Additional top-level files to include (SKILL.md lives above references/).
+SKILL_PATH = "features/migration-to-aws/skills/gcp-to-aws/SKILL.md"
+
 # GitHub API base URL.
 GITHUB_API = "https://api.github.com"
 
@@ -132,8 +135,10 @@ class RepoScanner:
                 item["path"]
                 for item in tree_items
                 if item.get("type") == "blob"
-                and item["path"].startswith(REFERENCES_PATH)
-                and item["path"].endswith(".md")
+                and (
+                    (item["path"].startswith(REFERENCES_PATH) and item["path"].endswith(".md"))
+                    or item["path"] == SKILL_PATH
+                )
             ]
 
             # 4. Fetch content for each markdown file.
