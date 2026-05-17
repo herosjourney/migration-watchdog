@@ -1,0 +1,123 @@
+name: Weekly Full Scan
+
+# Runs the full migration watchdog scan against the entire plugin every Sunday.
+# Uses GitHub App credentials to fetch all reference files from the target repo.
+# Findings are persisted to DynamoDB and visible in the dashboard.
+#
+# Also triggerable manually via workflow_dispatch for ad-hoc full scans.
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"  # Every Sunday at 06:00 UTC
+  workflow_dispatch:      # Manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60   # Full scan can take 30-45 min across all files
+
+    steps:
+      - name: Checkout watchdog repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Get GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.WATCHDOG_APP_ID }}
+          private-key: ${{ secrets.WATCHDOG_APP_PRIVATE_KEY }}
+          owner: herosjourney
+
+      - name: Install watchdog package
+        run: |
+          pip install -e .
+          python -c "import migration_watchdog; print('migration_watchdog OK')"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.WATCHDOG_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Run full scan
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_ID: ${{ secrets.WATCHDOG_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.WATCHDOG_APP_PRIVATE_KEY }}
+          GITHUB_INSTALLATION_ID: ${{ secrets.WATCHDOG_INSTALLATION_ID }}
+          WATCHDOG_TARGET_OWNER: ${{ vars.WATCHDOG_TARGET_OWNER || 'awslabs' }}
+          WATCHDOG_TARGET_REPO: ${{ vars.WATCHDOG_TARGET_REPO || 'startups' }}
+          DYNAMODB_TABLE: ${{ vars.DYNAMODB_TABLE || 'watchdog-findings' }}
+          WATCHDOG_PAYLOAD_BUCKET: ${{ vars.WATCHDOG_PAYLOAD_BUCKET || 'watchdog-payloads-herosjourney' }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          TRIGGER_TYPE: scheduled
+        run: python -m migration_watchdog.main
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f audit-report.json ]; then
+            echo "## Weekly Watchdog Scan Report" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'EOF'
+          import json, os
+
+          with open("audit-report.json") as f:
+              report = json.load(f)
+
+          findings = report.get("findings", [])
+          total = report.get("total_findings", len(findings))
+
+          lines = []
+          lines.append(f"**Total findings:** {total}")
+          lines.append(f"**Run ID:** `{report.get('run_id', 'unknown')[:8]}`")
+          lines.append(f"**Status:** {report.get('status', 'unknown')}")
+          lines.append("")
+
+          by_severity = {}
+          by_category = {}
+          for f in findings:
+              payload = f.get("auditor_payload") or {}
+              sev = payload.get("severity") or f.get("risk_level", "unknown")
+              cat = f.get("category", "unknown")
+              by_severity[sev] = by_severity.get(sev, 0) + 1
+              by_category[cat] = by_category.get(cat, 0) + 1
+
+          if by_severity:
+              lines.append("| Severity | Count |")
+              lines.append("|----------|-------|")
+              for sev, count in sorted(by_severity.items()):
+                  lines.append(f"| {sev} | {count} |")
+              lines.append("")
+
+          if by_category:
+              lines.append("| Category | Count |")
+              lines.append("|----------|-------|")
+              for cat, count in sorted(by_category.items()):
+                  if count:
+                      lines.append(f"| {cat} | {count} |")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("\n".join(lines) + "\n")
+          EOF
+          else
+            echo "No audit-report.json — scan may have failed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload scan report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-scan-report
+          path: audit-report.json
+          if-no-files-found: ignore
+          overwrite: true

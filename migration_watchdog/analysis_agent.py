@@ -29,8 +29,12 @@ from migration_watchdog.model_comparator import (
     compare_model_lists,
     compare_model_pricing,
 )
+from migration_watchdog.source_fetcher import AwsDocsSearcher
 
 logger = logging.getLogger(__name__)
+
+# Module-level docs searcher for analysis agent tools
+_analysis_docs_searcher = AwsDocsSearcher()
 
 # Module-level list that the create_finding tool appends to during a run.
 # Reset at the start of each run_analysis() call.
@@ -342,6 +346,102 @@ def web_search(query: str) -> str:
 
 
 @tool
+def search_aws_docs(query: str) -> str:
+    """Search AWS documentation for current information about a service, feature, or topic.
+
+    Use this tool to:
+    1. Verify whether a claim in the plugin's reference files is still accurate
+    2. Find newer AWS services or features that might make current guidance obsolete
+    3. Check service availability, status, or recommended alternatives
+
+    Args:
+        query: A specific search query, e.g. "App Runner new customers availability 2026",
+               "AWS container services comparison Fargate ECS EKS",
+               "Amazon Bedrock AgentCore latest features",
+               "AWS serverless compute options 2025"
+
+    Returns:
+        Relevant text excerpts from AWS documentation pages.
+    """
+    return _analysis_docs_searcher.search_and_fetch(query)
+
+
+@tool
+def check_service_obsolescence(
+    service_name: str,
+    current_recommendation: str,
+    use_case: str,
+) -> str:
+    """Check whether current plugin guidance for a service is obsolete due to newer AWS offerings.
+
+    Use this tool proactively for every service the plugin recommends. It searches AWS docs
+    for newer alternatives, updated best practices, or service status changes that would
+    make the current recommendation outdated.
+
+    Args:
+        service_name: The AWS service currently recommended (e.g., "AWS App Runner",
+                      "Amazon ECS Fargate", "Amazon RDS Aurora")
+        current_recommendation: What the plugin currently says about this service
+                                (e.g., "Use App Runner for containerized web apps")
+        use_case: The migration use case this service is recommended for
+                  (e.g., "containerized web application", "managed database", "ML inference")
+
+    Returns:
+        JSON string with obsolescence findings: newer alternatives, status changes,
+        updated best practices found in AWS documentation.
+    """
+    results: dict = {
+        "service": service_name,
+        "use_case": use_case,
+        "current_recommendation": current_recommendation,
+        "status_findings": [],
+        "newer_alternatives": [],
+        "updated_best_practices": [],
+    }
+
+    # 1. Check current service status
+    status_content = _analysis_docs_searcher.search_and_fetch(
+        f"{service_name} availability status new customers 2025 2026"
+    )
+    if status_content:
+        status_lower = status_content.lower()
+        closure_signals = [
+            "closed to new customers", "not accepting new customers",
+            "discontinued", "end of life", "no longer available",
+            "closed for new", "will be closed", "service is closing",
+        ]
+        for signal in closure_signals:
+            if signal in status_lower:
+                results["status_findings"].append({
+                    "type": "service_closure",
+                    "signal": signal,
+                    "content_preview": status_content[:500],
+                })
+                break
+
+    # 2. Search for newer alternatives
+    alternatives_content = _analysis_docs_searcher.search_and_fetch(
+        f"AWS {use_case} best practices 2025 recommended service alternative"
+    )
+    if alternatives_content:
+        results["newer_alternatives"].append({
+            "content_preview": alternatives_content[:800],
+        })
+
+    # 3. Check for updated best practices
+    best_practices_content = _analysis_docs_searcher.search_and_fetch(
+        f"{service_name} best practices migration guide updated"
+    )
+    if best_practices_content:
+        results["updated_best_practices"].append({
+            "content_preview": best_practices_content[:800],
+        })
+
+    import json as _json
+    return _json.dumps(results)
+
+
+@tool
 def create_finding(
     category: str,
     title: str,
@@ -446,18 +546,36 @@ Your tasks:
 - Compare each design-ref file against current AWS best practices using the compare_design_ref tool
 - Check for new content opportunities (Bedrock Agents, AgentCore, Strands SDK, startup migration) \
 using the check_new_content_opportunities tool
+- Use the search_aws_docs tool to search AWS documentation for current service status, \
+  newer alternatives, and updated best practices
+- Use the check_service_obsolescence tool for EVERY service the plugin recommends — \
+  proactively check whether newer AWS services or features make the current guidance obsolete
 - Use the web_search tool to verify claims or find current information when pre-fetched data \
 is insufficient
 - For each discrepancy found, create a Finding using the create_finding tool
 
+PROACTIVE OBSOLESCENCE CHECKING (MANDATORY):
+For each service mentioned in the plugin's reference files, call check_service_obsolescence to:
+1. Verify the service is still available to new customers
+2. Check if newer/better AWS alternatives exist for the same use case
+3. Identify if AWS has released updated best practices that supersede current guidance
+4. Flag if a recommended service has been deprecated, closed, or superseded
+
+Examples of what to check:
+- "App Runner" → is it still open to new customers? What's the recommended alternative?
+- "Fargate" → are there newer serverless container options?
+- "Claude Sonnet 3.5" → is there a newer recommended model?
+- Manual console steps → has AWS released automation/CLI for this?
+
 CRITICAL GROUNDING RULES:
 - ONLY flag discrepancies you can support with data from the tools (pre-fetched authoritative \
-data or web search results). Do NOT use your training knowledge as a source of truth.
+data, search_aws_docs, check_service_obsolescence, or web search results). Do NOT use your \
+training knowledge as a source of truth.
 - Every finding MUST include at least one source_url pointing to the authoritative data that \
 supports the discrepancy. If you cannot cite a source, do NOT create the finding.
-- If no authoritative data was fetched for a topic and web search returns no relevant results, \
-SKIP that topic entirely rather than guessing from training data.
-- When in doubt, use the web_search tool to verify before creating a finding.
+- If no authoritative data was fetched for a topic and all search tools return no relevant \
+results, SKIP that topic entirely rather than guessing from training data.
+- When in doubt, use search_aws_docs or web_search to verify before creating a finding.
 - Be thorough but precise. Only create findings for genuine discrepancies backed by cited data."""
 
 
@@ -481,6 +599,8 @@ def create_analysis_agent() -> Agent:
             compare_models,
             compare_design_ref,
             check_new_content_opportunities,
+            search_aws_docs,
+            check_service_obsolescence,
             web_search,
             create_finding,
         ],
@@ -736,8 +856,11 @@ def _build_guidance_prompt(
         "Compare each design-ref file against current AWS best practices. "
         "Pay special attention to the AI files — check if guidance on agentic workflows, "
         "Bedrock Agents, AgentCore, and Strands SDK is current. "
+        "For EVERY service mentioned in the design-ref files, call check_service_obsolescence "
+        "to verify it is still available to new customers and that no newer/better alternative "
+        "exists. Use search_aws_docs to find current service status and updated best practices. "
         "Use compare_design_ref tool and web_search to verify. "
-        "Create findings for outdated guidance. "
+        "Create findings for outdated guidance and obsolete service recommendations. "
         "Every finding must have source_urls."
     )
     return "\n".join(sections)
@@ -752,14 +875,30 @@ def _build_new_content_prompt(
     sections: list[str] = [f"## New Content Opportunities for Run: {run_id}\n"]
 
     # List repo file paths (not full content)
-    sections.append("### Repository Files\n")
+    file_count = len(repo_content.files)
+    sections.append(f"### Repository Files ({file_count} files loaded)\n")
     for path in sorted(repo_content.files.keys()):
         sections.append(f"- {path}")
     sections.append("")
 
+    # If fewer than 10 files are loaded, this is a PR-triggered run with limited context.
+    # Suppress new_content findings to avoid false "missing coverage" claims.
+    if file_count < 10:
+        sections.append(
+            "**NOTE: Only a small subset of repository files are loaded (PR-triggered run). "
+            "Do NOT create 'new_content' or 'missing coverage' findings — you cannot see the "
+            "full repository and would produce false positives. Skip this analysis entirely.**\n"
+        )
+        sections.append(
+            "\n## Instructions\n"
+            "This is a PR-triggered run with limited file context. "
+            "Do NOT create any new_content findings. Return without creating any findings."
+        )
+        return "\n".join(sections)
+
     # Include AI-related file content snippets so the agent can see what's covered
     sections.append("### Current AI/Agent Coverage in Repo\n")
-    ai_keywords = ["ai.md", "ai-gemini", "ai-openai", "ai-model-lifecycle"]
+    ai_keywords = ["ai.md", "ai-gemini", "ai-openai", "ai-model-lifecycle", "agentcore", "harness", "strands"]
     for path, content in repo_content.files.items():
         if any(kw in path for kw in ai_keywords):
             sections.append(f"#### {path} (first 2000 chars)\n```\n{content[:2000]}\n```\n")
