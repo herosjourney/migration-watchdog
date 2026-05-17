@@ -741,9 +741,11 @@ async def run_scan() -> None:
 
         # 8. Run refactoring assessment
         logger.info("Running refactoring assessment …")
-        refactoring_finding = run_refactoring_assessment(
-            repo_content, existing_findings, run_id
-        )
+        refactoring_finding = None
+        if _has_aws_credentials:
+            refactoring_finding = run_refactoring_assessment(
+                repo_content, existing_findings, run_id
+            )
         if refactoring_finding:
             if _has_aws_credentials:
                 findings_repo.save_finding(refactoring_finding)
