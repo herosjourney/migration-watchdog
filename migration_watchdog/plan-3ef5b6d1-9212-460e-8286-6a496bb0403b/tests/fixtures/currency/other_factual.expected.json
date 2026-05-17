@@ -1,0 +1,13 @@
+{
+  "findings_count": 1,
+  "findings": [
+    {
+      "category": "currency_drift",
+      "finding_schema_version": "currency/1.0",
+      "auditor_payload": {
+        "claim_type": "other_factual",
+        "claim_subtype": "sla_throughput"
+      }
+    }
+  ]
+}

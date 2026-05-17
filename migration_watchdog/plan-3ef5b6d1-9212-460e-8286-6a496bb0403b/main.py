@@ -535,32 +535,18 @@ async def run_scan() -> None:
                     for _m in _pat.finditer(_content):
                         _art = _m.group(1).strip()
                         if _art not in repo_content.files and _art not in _extra_scripts:
-                            # Try multiple path candidates (mirrors PR checkout mode):
-                            # 1. Path as-is
-                            # 2. Relative to features/.../references/
-                            # 3. Relative to the directory containing the referencing file
-                            _ref_dir = "/".join(_path.split("/")[:-1]) if "/" in _path else ""
-                            _candidates = [
-                                _art,
-                                f"features/migration-to-aws/skills/gcp-to-aws/references/{_art}",
-                                f"{_ref_dir}/{_art}" if _ref_dir else None,
-                            ]
-                            for _candidate in _candidates:
-                                if not _candidate or _candidate in repo_content.files or _candidate in _extra_scripts:
-                                    continue
-                                try:
-                                    async with httpx.AsyncClient(timeout=15.0) as _client:
-                                        _resp = await _client.get(
-                                            f"https://api.github.com/repos/{target_owner}/{target_repo}/contents/{_candidate}",
-                                            headers=_gh_headers,
-                                        )
-                                    if _resp.status_code == 200:
-                                        _data = _resp.json()
-                                        _extra_scripts[_candidate] = _b64.b64decode(_data.get("content", "")).decode("utf-8")
-                                        logger.debug("Fetched referenced artifact for scheduled scan: %s", _candidate)
-                                        break  # found it — stop trying candidates
-                                except Exception as _exc:
-                                    logger.debug("Could not fetch artifact %s: %s", _candidate, _exc)
+                            try:
+                                async with httpx.AsyncClient(timeout=15.0) as _client:
+                                    _resp = await _client.get(
+                                        f"https://api.github.com/repos/{target_owner}/{target_repo}/contents/{_art}",
+                                        headers=_gh_headers,
+                                    )
+                                if _resp.status_code == 200:
+                                    _data = _resp.json()
+                                    _extra_scripts[_art] = _b64.b64decode(_data.get("content", "")).decode("utf-8")
+                                    logger.debug("Fetched referenced artifact for scheduled scan: %s", _art)
+                            except Exception as _exc:
+                                logger.debug("Could not fetch artifact %s: %s", _art, _exc)
             if _extra_scripts:
                 repo_content.files.update(_extra_scripts)
                 logger.info("Added %d referenced artifact script(s) to scheduled scan snapshot", len(_extra_scripts))

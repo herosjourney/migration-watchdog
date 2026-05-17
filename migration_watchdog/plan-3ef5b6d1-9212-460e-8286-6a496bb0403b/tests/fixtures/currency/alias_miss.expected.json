@@ -1,0 +1,14 @@
+{
+  "findings_count": 1,
+  "findings": [
+    {
+      "category": "currency_drift",
+      "finding_schema_version": "currency/1.0",
+      "auditor_payload": {
+        "claim_type": "model_id",
+        "alias_found": false,
+        "claim_text": "Claude 4 Turbo"
+      }
+    }
+  ]
+}

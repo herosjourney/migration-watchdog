@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout watchdog repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # 3.12 required: currency_auditor.py uses match/case (Python 3.10+)
+
+      - name: Create migration_watchdog symlink
+        run: |
+          # The package directory is the inner UUID-named directory.
+          # Create a migration_watchdog symlink so imports resolve correctly.
+          SUBDIR="${{ vars.WATCHDOG_PACKAGE_SUBDIR }}"
+          if [ -z "$SUBDIR" ]; then
+            SUBDIR=$(find . -maxdepth 1 -name "__init__.py" -exec dirname {} \; | xargs basename 2>/dev/null | head -1)
+          fi
+          if [ -n "$SUBDIR" ] && [ "$SUBDIR" != "migration_watchdog" ] && [ ! -e "migration_watchdog" ]; then
+            ln -sf "$SUBDIR" migration_watchdog
+            echo "Created symlink: migration_watchdog -> $SUBDIR"
+          fi
+
+      - name: Install package and test dependencies
+        run: |
+          pip install -e .
+          pip install pytest pytest-asyncio hypothesis pytest-forked
+          # Verify the package is importable
+          python -c "import migration_watchdog; print('migration_watchdog OK')"
+
+      - name: Run all tests in one shot (forked for isolation)
+        # --forked runs each test file in a subprocess, preventing sys.modules
+        # stub pollution between test_main_pipeline.py / test_pr_smoke.py
+        # (which stub migration_watchdog.*) and the fixture integration tests
+        # (which need the real package).
+        run: |
+          pytest migration_watchdog/tests/ --forked -v --tb=short
