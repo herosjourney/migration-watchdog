@@ -18,10 +18,10 @@ from migration_watchdog.models import PullRequest, RepoContent
 from migration_watchdog.retry import retry_with_backoff
 
 # Path prefix for markdown files to scan in the target repo.
-REFERENCES_PATH = "features/migration-to-aws/skills/gcp-to-aws/references"
+REFERENCES_PATH = "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references"
 
 # Additional top-level files to include (SKILL.md lives above references/).
-SKILL_PATH = "features/migration-to-aws/skills/gcp-to-aws/SKILL.md"
+SKILL_PATH = "migrate/plugins/migration-to-aws/skills/gcp-to-aws/SKILL.md"
 
 # GitHub API base URL.
 GITHUB_API = "https://api.github.com"
