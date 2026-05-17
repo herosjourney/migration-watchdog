@@ -452,8 +452,8 @@ async def run_scan() -> None:
             # pricing-cache.md (for price claim verification) and any referenced
             # generated_artifact scripts (for gap assessment).
             _SHARED_ARTIFACTS = [
-                "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md",
-                "features/migration-to-aws/skills/gcp-to-aws/SKILL.md",
+                "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md",
+                "migrate/plugins/migration-to-aws/skills/gcp-to-aws/SKILL.md",
             ]
             for artifact_path in _SHARED_ARTIFACTS:
                 if artifact_path not in files:
@@ -489,7 +489,7 @@ async def run_scan() -> None:
                         # Try the path as-is, then relative to features/.../references/
                         _candidates = [
                             _artifact_rel,
-                            _os.path.join("features/migration-to-aws/skills/gcp-to-aws/references", _artifact_rel),
+                            _os.path.join("migrate/plugins/migration-to-aws/skills/gcp-to-aws/references", _artifact_rel),
                         ]
                         for _candidate in _candidates:
                             if _candidate not in files:
@@ -542,7 +542,7 @@ async def run_scan() -> None:
                             _ref_dir = "/".join(_path.split("/")[:-1]) if "/" in _path else ""
                             _candidates = [
                                 _art,
-                                f"features/migration-to-aws/skills/gcp-to-aws/references/{_art}",
+                                f"migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/{_art}",
                                 f"{_ref_dir}/{_art}" if _ref_dir else None,
                             ]
                             for _candidate in _candidates:
