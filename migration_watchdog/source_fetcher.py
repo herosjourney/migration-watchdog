@@ -147,6 +147,232 @@ def extract_text_from_html(html: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# AwsDocsSearcher — live AWS documentation search
+# ---------------------------------------------------------------------------
+
+
+class AwsDocsSearcher:
+    """Searches and fetches AWS documentation pages on demand.
+
+    Uses the same AWS Documentation Search API that the AWS Documentation
+    MCP server uses, making direct HTTP calls so it works in CI without
+    a local MCP process.
+
+    Two operations:
+    - ``search(query)`` — returns a list of (title, url, snippet) tuples
+    - ``fetch_page(url)`` — fetches and extracts text from a specific docs page
+
+    Performance tuning:
+    - Page fetch timeout: 8s (not 15s) — AWS docs pages load fast or not at all
+    - search_and_fetch only fetches 1 page (not 3) to keep latency under 15s total
+    - In-process cache prevents re-fetching the same page/query in the same run
+    """
+
+    _SEARCH_API = "https://docs.aws.amazon.com/search/doc-search.html"
+
+    def __init__(self, timeout: float = 8.0) -> None:
+        self._timeout = timeout
+        # Simple in-process cache: query -> results
+        self._search_cache: dict[str, list[dict]] = {}
+        self._page_cache: dict[str, str] = {}
+
+    def search(self, query: str, limit: int = 3) -> list[dict]:
+        """Search AWS documentation for *query*.
+
+        Returns a list of dicts with keys: title, url, snippet.
+        Returns empty list on any error.
+        """
+        cache_key = f"{query}:{limit}"
+        if cache_key in self._search_cache:
+            return self._search_cache[cache_key]
+
+        results: list[dict] = []
+        try:
+            import httpx as _httpx
+            params = {
+                "searchPath": "documentation",
+                "searchQuery": query,
+                "this_doc_locale": "en_us",
+            }
+            with _httpx.Client(timeout=self._timeout) as client:
+                resp = client.get(self._SEARCH_API, params=params)
+                if resp.status_code == 200:
+                    results = self._parse_search_response(resp.text, limit)
+        except Exception as exc:
+            logger.debug("AwsDocsSearcher.search failed for %r: %s", query, exc)
+
+        # If HTML search didn't work, fall back to fetching specific service pages
+        if not results:
+            results = self._fallback_search(query, limit)
+
+        self._search_cache[cache_key] = results
+        return results
+
+    def fetch_page(self, url: str) -> str:
+        """Fetch and extract text content from an AWS docs page.
+
+        Returns empty string on any error.
+        """
+        if url in self._page_cache:
+            return self._page_cache[url]
+
+        content = ""
+        try:
+            import httpx as _httpx
+            with _httpx.Client(timeout=self._timeout, follow_redirects=True) as client:
+                resp = client.get(url, headers={"Accept": "text/html"})
+                if resp.status_code == 200:
+                    content = extract_text_from_html(resp.text)[:6000]
+        except Exception as exc:
+            logger.debug("AwsDocsSearcher.fetch_page failed for %r: %s", url, exc)
+
+        self._page_cache[url] = content
+        return content
+
+    def search_and_fetch(self, query: str) -> str:
+        """Search for *query* and return content from the top result only.
+
+        Fetches only 1 page to keep total latency under ~15 seconds.
+        Returns up to 3000 chars of content.
+        """
+        results = self.search(query, limit=3)
+        if not results:
+            return ""
+
+        parts: list[str] = []
+
+        # Always include snippets from all results (no HTTP needed)
+        for r in results[:3]:
+            snippet = r.get("snippet", "")
+            if snippet:
+                parts.append(f"[{r.get('title', '')}] {snippet}")
+
+        # Fetch only the top result's page
+        top_url = results[0].get("url", "")
+        if top_url:
+            page_text = self.fetch_page(top_url)
+            if page_text:
+                parts.append(page_text[:2000])
+
+        combined = "\n\n".join(parts)
+        return combined[:3000]
+
+    def _parse_search_response(self, html: str, limit: int) -> list[dict]:
+        """Parse search results from AWS docs search HTML response."""
+        results: list[dict] = []
+        import json as _json
+        import re as _re
+
+        # Try to find JSON data in the response
+        json_match = _re.search(r'"hits"\s*:\s*\{[^}]*"hits"\s*:\s*(\[.*?\])', html, _re.DOTALL)
+        if json_match:
+            try:
+                hits = _json.loads(json_match.group(1))
+                for hit in hits[:limit]:
+                    source = hit.get("_source", {})
+                    results.append({
+                        "title": source.get("title", ""),
+                        "url": source.get("url", ""),
+                        "snippet": source.get("excerpt", ""),
+                    })
+                return results
+            except Exception:
+                pass
+
+        # Fallback: extract links and titles from HTML
+        link_pattern = _re.compile(
+            r'<a[^>]+href="(https://docs\.aws\.amazon\.com[^"]+)"[^>]*>([^<]+)</a>',
+            _re.IGNORECASE,
+        )
+        for m in link_pattern.finditer(html):
+            url, title = m.group(1), m.group(2).strip()
+            if title and url:
+                results.append({"title": title, "url": url, "snippet": ""})
+            if len(results) >= limit:
+                break
+        return results
+
+    def _fallback_search(self, query: str, limit: int) -> list[dict]:
+        """Fallback: return known AWS service page URLs relevant to the query.
+
+        Does NOT fetch pages here — just returns URLs with empty snippets.
+        The caller decides whether to fetch.
+        """
+        query_lower = query.lower()
+
+        service_docs: dict[str, tuple[str, str]] = {
+            "app runner": (
+                "AWS App Runner",
+                "https://docs.aws.amazon.com/apprunner/latest/dg/what-is-apprunner.html",
+            ),
+            "fargate": (
+                "AWS Fargate",
+                "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html",
+            ),
+            "lambda": (
+                "AWS Lambda",
+                "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
+            ),
+            "eks": (
+                "Amazon EKS",
+                "https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html",
+            ),
+            "ecs": (
+                "Amazon ECS",
+                "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html",
+            ),
+            "bedrock": (
+                "Amazon Bedrock",
+                "https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html",
+            ),
+            "agentcore": (
+                "Amazon Bedrock AgentCore",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html",
+            ),
+            "harness": (
+                "Amazon Bedrock AgentCore Harness",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html",
+            ),
+            "dynamodb": (
+                "Amazon DynamoDB",
+                "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html",
+            ),
+            "s3": (
+                "Amazon S3",
+                "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html",
+            ),
+            "rds": (
+                "Amazon RDS",
+                "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html",
+            ),
+            "aurora": (
+                "Amazon Aurora",
+                "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraOverview.html",
+            ),
+            "quota": (
+                "AWS Service Quotas",
+                "https://docs.aws.amazon.com/servicequotas/latest/userguide/intro.html",
+            ),
+            "region": (
+                "AWS Regions",
+                "https://docs.aws.amazon.com/general/latest/gr/rande.html",
+            ),
+        }
+
+        results: list[dict] = []
+        for keyword, (title, url) in service_docs.items():
+            if keyword in query_lower:
+                results.append({"title": title, "url": url, "snippet": ""})
+            if len(results) >= limit:
+                break
+        return results
+
+
+# Module-level singleton for use as a Strands tool
+_docs_searcher = AwsDocsSearcher()
+
+
+# ---------------------------------------------------------------------------
 # SourceFetcher
 # ---------------------------------------------------------------------------
 

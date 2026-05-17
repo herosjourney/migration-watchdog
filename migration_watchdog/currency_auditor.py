@@ -22,12 +22,34 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from strands import Agent
+from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
 
 from migration_watchdog.alias_table import AliasTable
+from migration_watchdog.source_fetcher import AwsDocsSearcher
 
 logger = logging.getLogger(__name__)
+
+# Module-level docs searcher instance (shared across all ClaimExtractor/Verifier calls)
+_docs_searcher = AwsDocsSearcher()
+
+
+@tool
+def search_aws_docs(query: str) -> str:
+    """Search AWS documentation and return relevant content for claim verification.
+
+    Use this tool to verify factual claims against current AWS documentation
+    before including them in your output. Search for the specific service,
+    feature, or fact you want to verify.
+
+    Args:
+        query: A specific search query, e.g. "App Runner new customers availability",
+               "Fargate region availability", "Claude Opus 4 model ID Bedrock"
+
+    Returns:
+        Relevant text excerpts from AWS documentation pages.
+    """
+    return _docs_searcher.search_and_fetch(query)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -142,6 +164,17 @@ You are a factual-claim extraction assistant for a migration documentation audit
 Your task is to read a Markdown Reference_File and extract ONLY objectively verifiable
 factual claims — assertions that can be confirmed or refuted by querying AWS documentation
 or AWS pricing sources.
+
+IMPORTANT: You have access to the `search_aws_docs` tool. Before finalizing any claim,
+use this tool to verify the claim against current AWS documentation. This is mandatory for:
+- Service availability claims (e.g. "App Runner is available for new customers")
+- Feature status claims (e.g. "preview", "GA", "deprecated", "closed")
+- Region availability claims
+- Any claim about a service being recommended or not recommended
+
+If your search reveals that a claim in the document is INCORRECT or OUTDATED based on
+current AWS documentation, still include it in your output — the auditor needs to know
+about stale claims. Set the verification_query to reflect what the docs actually say.
 
 DO NOT extract:
 - Opinions, recommendations, or design decisions
@@ -374,7 +407,7 @@ class ClaimExtractor:
             agent = Agent(
                 model=model,
                 system_prompt=_EXTRACTION_SYSTEM_PROMPT,
-                tools=[],
+                tools=[search_aws_docs],
             )
             prompt = _build_extraction_prompt(file_path, content)
             response = agent(prompt)
@@ -589,12 +622,19 @@ class ClaimVerifier:
     - ``region_list`` / ``region_count``: set equality / numeric comparison.
     - ``model_id``: exact match against Bedrock lifecycle after alias resolution.
     - ``eol_date``: exact match on normalised YYYY-MM-DD.
-    - ``quota_limit`` / ``api_name``: compare against AWS docs → severity="outdated".
-    - ``service_name`` / ``feature_availability``: rename/preview→GA → "policy_change";
-      deprecation → "outdated"; removal → "correctness".
-    - ``other_factual``: compare against AWS docs → severity="outdated".
+    - ``quota_limit`` / ``api_name``: compare against AWS docs → LLM judgment.
+    - ``service_name`` / ``feature_availability``: LLM judgment using live docs search.
+    - ``other_factual``: compare against AWS docs → LLM judgment.
     - No source result or timeout → status="unverified".
     """
+
+    def __init__(
+        self,
+        model_id: str = "us.anthropic.claude-opus-4-7",
+        region_name: str = "us-east-1",
+    ) -> None:
+        self._model_id = model_id
+        self._region_name = region_name
 
     def verify(
         self,
@@ -1015,9 +1055,17 @@ class ClaimVerifier:
         authoritative_data: Any,
         severity: str,
     ) -> VerificationResult:
-        """Compare claim against AWS docs content; mismatch → given severity."""
-        docs_content = self._get_docs_content(claim, authoritative_data)
-        if docs_content is None:
+        """Compare claim against AWS docs content; mismatch → given severity.
+
+        Uses live AWS docs search + LLM judgment to determine if the claim
+        is accurate, outdated, or incorrect based on current documentation.
+        """
+        # Try live search first
+        live_content = _docs_searcher.search_and_fetch(claim.verification_query)
+        docs_content = live_content or self._get_docs_content(claim, authoritative_data)
+        source_ref = self._get_docs_source(claim, authoritative_data)
+
+        if not docs_content:
             return VerificationResult(
                 claim_id=claim.claim_id,
                 status="unverified",
@@ -1029,35 +1077,42 @@ class ClaimVerifier:
                 price_metadata=None,
             )
 
-        # Simple presence check: if the claim_text appears verbatim in docs, it's accurate.
-        # For a more robust check we look for the claim text (case-insensitive) in the docs.
-        claim_lower = claim.claim_text.lower()
-        docs_lower = docs_content.lower()
-        source_ref = self._get_docs_source(claim, authoritative_data)
-
-        if claim_lower in docs_lower:
+        # Use LLM to judge whether the claim is accurate based on docs content
+        judgment = self._llm_verify_claim(claim, docs_content)
+        if judgment["status"] == "verified_accurate":
             return VerificationResult(
                 claim_id=claim.claim_id,
                 status="verified_accurate",
                 severity=None,
-                actual_value=claim.claim_text,
+                actual_value=judgment.get("actual_value", claim.claim_text),
+                verification_source=source_ref,
+                suggested_fix=None,
+                price_verification_path=None,
+                price_metadata=None,
+            )
+        if judgment["status"] == "unverified":
+            return VerificationResult(
+                claim_id=claim.claim_id,
+                status="unverified",
+                severity=None,
+                actual_value=None,
                 verification_source=source_ref,
                 suggested_fix=None,
                 price_verification_path=None,
                 price_metadata=None,
             )
 
-        # Claim not found in docs — flag as finding
+        # Finding — use LLM-determined severity and suggested fix
         return VerificationResult(
             claim_id=claim.claim_id,
             status="finding",
-            severity=severity,
-            actual_value=None,
+            severity=judgment.get("severity", severity),
+            actual_value=judgment.get("actual_value"),
             verification_source=source_ref,
-            suggested_fix=(
+            suggested_fix=judgment.get("suggested_fix", (
                 f"Verify {claim.claim_type.replace('_', ' ')} claim against current AWS documentation: "
                 f"{claim.verification_query}"
-            ),
+            )),
             price_verification_path=None,
             price_metadata=None,
         )
@@ -1071,11 +1126,20 @@ class ClaimVerifier:
         claim: "Claim",
         authoritative_data: Any,
     ) -> VerificationResult:
-        """Rename/preview→GA → policy_change; deprecation → outdated; removal → correctness."""
-        docs_content = self._get_docs_content(claim, authoritative_data)
+        """Rename/preview→GA → policy_change; deprecation → outdated; removal → correctness.
+
+        Uses live AWS docs search + LLM judgment to determine actual service status.
+        """
+        # Search with a targeted query about the specific service/feature
+        search_query = f"{claim.claim_text} AWS documentation"
+        live_content = _docs_searcher.search_and_fetch(search_query)
+        # Also search the verification_query directly
+        if not live_content:
+            live_content = _docs_searcher.search_and_fetch(claim.verification_query)
+        docs_content = live_content or self._get_docs_content(claim, authoritative_data)
         source_ref = self._get_docs_source(claim, authoritative_data)
 
-        if docs_content is None:
+        if not docs_content:
             return VerificationResult(
                 claim_id=claim.claim_id,
                 status="unverified",
@@ -1087,51 +1151,96 @@ class ClaimVerifier:
                 price_metadata=None,
             )
 
-        claim_lower = claim.claim_text.lower()
-        docs_lower = docs_content.lower()
-
-        if claim_lower in docs_lower:
+        # Use LLM to judge whether the claim is accurate based on docs content
+        judgment = self._llm_verify_claim(claim, docs_content)
+        if judgment["status"] == "verified_accurate":
             return VerificationResult(
                 claim_id=claim.claim_id,
                 status="verified_accurate",
                 severity=None,
-                actual_value=claim.claim_text,
+                actual_value=judgment.get("actual_value", claim.claim_text),
+                verification_source=source_ref,
+                suggested_fix=None,
+                price_verification_path=None,
+                price_metadata=None,
+            )
+        if judgment["status"] == "unverified":
+            return VerificationResult(
+                claim_id=claim.claim_id,
+                status="unverified",
+                severity=None,
+                actual_value=None,
                 verification_source=source_ref,
                 suggested_fix=None,
                 price_verification_path=None,
                 price_metadata=None,
             )
 
-        # Determine severity based on signals in docs content
-        severity = self._classify_service_severity(claim.claim_text, docs_content)
-        fix_map = {
-            "policy_change": (
-                f"Service or feature name may have changed or moved to GA. "
-                f"Verify: {claim.verification_query}"
-            ),
-            "outdated": (
-                f"Service or feature may be deprecated. "
-                f"Verify: {claim.verification_query}"
-            ),
-            "correctness": (
-                f"Service or feature may have been removed. "
-                f"Verify: {claim.verification_query}"
-            ),
-        }
+        # Finding — use LLM-determined severity and suggested fix
         return VerificationResult(
             claim_id=claim.claim_id,
             status="finding",
-            severity=severity,
-            actual_value=None,
+            severity=judgment.get("severity", "policy_change"),
+            actual_value=judgment.get("actual_value"),
             verification_source=source_ref,
-            suggested_fix=fix_map.get(severity, f"Verify: {claim.verification_query}"),
+            suggested_fix=judgment.get("suggested_fix", f"Verify: {claim.verification_query}"),
             price_verification_path=None,
             price_metadata=None,
         )
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+    def _llm_verify_claim(self, claim: "Claim", docs_content: str) -> dict:
+        """Use an LLM to judge whether a claim is accurate based on docs content.
+
+        Uses Nova 2 Lite (fast, cheap) for this binary judgment call.
+        Returns a dict with keys:
+        - status: "verified_accurate" | "finding" | "unverified"
+        - severity: "correctness" | "outdated" | "policy_change" | "informational" (when finding)
+        - actual_value: what the docs actually say (when finding)
+        - suggested_fix: specific actionable fix (when finding)
+        """
+        try:
+            prompt = f"""Verify this claim against the AWS documentation excerpt below.
+
+CLAIM: {claim.claim_text}
+QUESTION: {claim.verification_query}
+
+DOCUMENTATION:
+{docs_content[:2000]}
+
+Respond with ONLY a JSON object (no explanation):
+{{"status": "verified_accurate" | "finding" | "unverified", "severity": "correctness" | "outdated" | "policy_change" | null, "actual_value": "what docs say or null", "suggested_fix": "specific fix or null"}}
+
+Use "unverified" if the docs don't contain enough information to answer."""
+
+            # Use Nova 2 Lite for fast, cheap judgment calls
+            model = BedrockModel(
+                model_id="us.amazon.nova-2-lite-v1:0",
+                region_name=self._region_name,
+                max_tokens=300,
+            )
+            agent = Agent(model=model, system_prompt="You are a precise fact-checker. Respond only with valid JSON.", tools=[])
+            response_text = str(agent(prompt))
+
+            # Parse JSON response
+            import re as _re
+            fence_match = _re.search(r"```(?:json)?\s*([\s\S]*?)```", response_text)
+            if fence_match:
+                response_text = fence_match.group(1).strip()
+            bracket_idx = response_text.find("{")
+            if bracket_idx != -1:
+                response_text = response_text[bracket_idx:]
+            end_idx = response_text.rfind("}")
+            if end_idx != -1:
+                response_text = response_text[:end_idx + 1]
+
+            result = json.loads(response_text)
+            if result.get("status") not in ("verified_accurate", "finding", "unverified"):
+                result["status"] = "unverified"
+            return result
+
+        except Exception as exc:
+            logger.debug("_llm_verify_claim failed for claim %s: %s", claim.claim_id[:16], exc)
+            return {"status": "unverified", "severity": None, "actual_value": None, "suggested_fix": None}
 
     def _find_cache_entry(
         self,
@@ -1317,17 +1426,21 @@ class ClaimVerifier:
     def _classify_service_severity(self, claim_text: str, docs_content: str) -> str:
         """Classify severity for service_name/feature_availability mismatches."""
         docs_lower = docs_content.lower()
-        # Removal signals
-        removal_signals = ["removed", "discontinued", "no longer available", "end of life", "eol"]
+        # Removal / closure signals → correctness
+        removal_signals = [
+            "removed", "discontinued", "no longer available", "end of life", "eol",
+            "closed to new customers", "not accepting new customers", "closed for new",
+            "no longer accepting", "service is closing", "will be closed",
+        ]
         for signal in removal_signals:
             if signal in docs_lower:
                 return "correctness"
-        # Deprecation signals
+        # Deprecation signals → outdated
         deprecation_signals = ["deprecated", "deprecation", "legacy", "will be removed"]
         for signal in deprecation_signals:
             if signal in docs_lower:
                 return "outdated"
-        # Rename / preview→GA signals
+        # Rename / preview→GA signals → policy_change
         rename_signals = ["renamed", "now called", "generally available", "ga", "preview"]
         for signal in rename_signals:
             if signal in docs_lower:
