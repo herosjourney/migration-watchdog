@@ -199,9 +199,15 @@ REVIEW_SYSTEM_PROMPT = (
 
 
 def create_review_agent() -> Agent:
-    """Create the Strands review agent with Nova 2 Pro."""
+    """Create the Strands review agent with Nova 2 Lite.
+    
+    Nova 2 Lite is used instead of Nova Premier based on Amazon's Nova 2
+    technical report showing Nova 2 Lite surpasses Premier on multi-step
+    problem-solving at 7x lower cost and up to 5x faster inference.
+    Benchmark your specific workloads if you need to compare.
+    """
     model = BedrockModel(
-        model_id="us.amazon.nova-premier-v1:0",
+        model_id="us.amazon.nova-2-lite-v1:0",
         region_name="us-east-1",
     )
     return Agent(

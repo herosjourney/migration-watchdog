@@ -42,9 +42,9 @@ At the same time, the runbooks tell users to do things manually — "go to the S
 The primary LLM agent. Reads all reference files and compares them against live AWS documentation, pricing pages, Gemini/OpenAI model data, and blog posts. Identifies outdated guidance, deprecated models, missing content, and pricing drift. Produces findings with source citations.
 
 ### 2. Review Agent
-**Model:** Amazon Nova Premier (Amazon Bedrock)
+**Model:** Amazon Nova 2 Lite (Amazon Bedrock)
 
-Quality-checks medium and high-risk findings from the Analysis Agent. Uses a different model family to catch hallucinations and unsupported claims. Can confirm, correct, or dispute each finding. Disputed findings pass through with both models' reasoning attached for human review.
+Quality-checks medium and high-risk findings from the Analysis Agent. Uses a different model family to catch hallucinations and unsupported claims. Nova 2 Lite is used here based on Amazon's Nova 2 technical report showing it surpasses Premier on multi-step problem-solving at 7x lower cost and up to 5x faster inference. Can confirm, correct, or dispute each finding. Disputed findings pass through with both models' reasoning attached for human review.
 
 ### 3. Currency Auditor *(new)*
 **Model:** Claude Opus 4.7 (Amazon Bedrock) for extraction; deterministic verification
