@@ -416,21 +416,28 @@ async def run_scan() -> None:
     # Initialise DynamoDB resource and repository
     dynamodb_resource = boto3.resource("dynamodb", region_name=aws_region)
     findings_repo = FindingsRepository(dynamodb_resource, dynamodb_table)
+    _has_aws_credentials = True
 
     # 1. Record run start
     logger.info("Starting scan run %s", run_id)
-    findings_repo.save_run(
-        ScanRun(
-            run_id=run_id,
-            start_timestamp=start_timestamp,
-            status="running",
-            trigger_type=trigger_type,
-            audited_files=audited_files,
-            source_pr_number=pr_number,
-            source_pr_head_sha=pr_head_sha,
-            source_pr_html_url=pr_html_url,
+    try:
+        findings_repo.save_run(
+            ScanRun(
+                run_id=run_id,
+                start_timestamp=start_timestamp,
+                status="running",
+                trigger_type=trigger_type,
+                audited_files=audited_files,
+                source_pr_number=pr_number,
+                source_pr_head_sha=pr_head_sha,
+                source_pr_html_url=pr_html_url,
+            )
         )
-    )
+    except Exception as exc:
+        # NoCredentialsError or any other AWS error — skip persistence for this run.
+        # This happens on fork PRs where OIDC credentials are unavailable.
+        logger.warning("DynamoDB unavailable (no credentials?), skipping persistence: %s", exc)
+        _has_aws_credentials = False
 
     try:
         # 2. Fetch repo content
@@ -634,7 +641,7 @@ async def run_scan() -> None:
 
         # 5. Deduplicate findings with per-category keys
         logger.info("Deduplicating findings …")
-        existing_findings = findings_repo.list_findings(exclude_dismissed=False)
+        existing_findings = findings_repo.list_findings(exclude_dismissed=False) if _has_aws_credentials else []
 
         # Analysis findings use default key
         deduped_analysis = deduplicate(raw_findings, repo_content.open_prs, existing_findings)
@@ -681,6 +688,9 @@ async def run_scan() -> None:
         # from persistence are appended below.
         persisted_findings: list[Finding] = []
         for finding in reviewed_findings:
+            if not _has_aws_credentials:
+                persisted_findings.append(finding)
+                continue
             try:
                 findings_repo.save_finding(finding)
                 persisted_findings.append(finding)
@@ -713,7 +723,7 @@ async def run_scan() -> None:
 
         # 7a. Clean up existing findings now covered by open PRs
         logger.info("Checking existing findings against open PRs …")
-        all_pending = findings_repo.list_findings(status="pending", exclude_dismissed=True)
+        all_pending = findings_repo.list_findings(status="pending", exclude_dismissed=True) if _has_aws_credentials else []
         from migration_watchdog.finding_deduplicator import _is_addressed_by_pr
         cleaned = 0
         for existing in all_pending:
@@ -735,7 +745,8 @@ async def run_scan() -> None:
             repo_content, existing_findings, run_id
         )
         if refactoring_finding:
-            findings_repo.save_finding(refactoring_finding)
+            if _has_aws_credentials:
+                findings_repo.save_finding(refactoring_finding)
             reviewed_findings.append(refactoring_finding)
             logger.info("Refactoring finding created: %s", refactoring_finding.finding_id)
         else:
@@ -743,23 +754,24 @@ async def run_scan() -> None:
 
         # 9. Record run complete
         end_timestamp = datetime.utcnow().isoformat()
-        findings_repo.save_run(
-            ScanRun(
-                run_id=run_id,
-                start_timestamp=start_timestamp,
-                end_timestamp=end_timestamp,
-                status="completed",
-                findings_count=len(reviewed_findings),
-                findings_by_risk=_count_by_risk(reviewed_findings),
-                partial_source_failures=partial_source_failures,
-                partial_data_warning=bool(partial_source_failures),  # True when any failure occurred
-                trigger_type=trigger_type,
-                audited_files=audited_files,
-                source_pr_number=pr_number,
-                source_pr_head_sha=pr_head_sha,
-                source_pr_html_url=pr_html_url,
+        if _has_aws_credentials:
+            findings_repo.save_run(
+                ScanRun(
+                    run_id=run_id,
+                    start_timestamp=start_timestamp,
+                    end_timestamp=end_timestamp,
+                    status="completed",
+                    findings_count=len(reviewed_findings),
+                    findings_by_risk=_count_by_risk(reviewed_findings),
+                    partial_source_failures=partial_source_failures,
+                    partial_data_warning=bool(partial_source_failures),
+                    trigger_type=trigger_type,
+                    audited_files=audited_files,
+                    source_pr_number=pr_number,
+                    source_pr_head_sha=pr_head_sha,
+                    source_pr_html_url=pr_html_url,
+                )
             )
-        )
         logger.info(
             "Scan run %s completed: %d findings (%s)",
             run_id,
@@ -769,20 +781,21 @@ async def run_scan() -> None:
 
     except Exception as exc:
         logger.exception("Scan run %s failed: %s", run_id, exc)
-        findings_repo.save_run(
-            ScanRun(
-                run_id=run_id,
-                start_timestamp=start_timestamp,
-                end_timestamp=datetime.utcnow().isoformat(),
-                status="failed",
-                failure_reason=str(exc),
-                trigger_type=trigger_type,
-                audited_files=audited_files,
-                source_pr_number=pr_number,
-                source_pr_head_sha=pr_head_sha,
-                source_pr_html_url=pr_html_url,
+        if _has_aws_credentials:
+            findings_repo.save_run(
+                ScanRun(
+                    run_id=run_id,
+                    start_timestamp=start_timestamp,
+                    end_timestamp=datetime.utcnow().isoformat(),
+                    status="failed",
+                    failure_reason=str(exc),
+                    trigger_type=trigger_type,
+                    audited_files=audited_files,
+                    source_pr_number=pr_number,
+                    source_pr_head_sha=pr_head_sha,
+                    source_pr_html_url=pr_html_url,
+                )
             )
-        )
         sys.exit(1)
 
 
