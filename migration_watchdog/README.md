@@ -94,8 +94,8 @@ available to new customers and whether newer alternatives exist.
 - `compare_models` — compares AI model mapping guides against current Gemini/OpenAI/Bedrock data
 - `compare_design_ref` — compares design-ref files against current AWS best practices
 - `check_new_content_opportunities` — identifies gaps in agentic AI coverage (weekly scans only)
-- `search_aws_docs` — live search of AWS documentation for current service status
-- `check_service_obsolescence` — proactively checks each recommended service for closure, newer alternatives, and updated best practices
+- `search_aws_docs` — live search of AWS documentation via the [AWS Documentation MCP Server](https://github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server) (`awslabs.aws-documentation-mcp-server`). Searches `docs.aws.amazon.com` for current service status, feature availability, and best practices
+- `check_service_obsolescence` — proactively checks each recommended service for closure, newer alternatives, and updated best practices using the AWS Documentation MCP Server
 - `web_search` — DuckDuckGo search for current information when pre-fetched data is insufficient
 - `create_finding` — creates a structured Finding with source citations
 
@@ -142,7 +142,7 @@ or incorrect.
 
 **Verification flow for each claim:**
 1. Extract claim text and generate a verification query (Claude Opus 4.7)
-2. Search AWS docs live for the verification query (`AwsDocsSearcher`)
+2. Search AWS docs live via the AWS Documentation MCP Server (`AwsDocsSearcher`)
 3. Fetch the top result page (8s timeout)
 4. Pass docs content + claim to Nova 2 Lite for a binary judgment
 5. Return `verified_accurate`, `finding`, or `unverified`
@@ -230,6 +230,72 @@ DYNAMODB_TABLE=watchdog-findings AWS_REGION=us-east-1 \
   python3 -m uvicorn migration_watchdog.dashboard:app --reload
 ```
 Then open http://localhost:8000.
+
+---
+
+## AWS Documentation MCP Server
+
+The Watchdog uses the
+[AWS Documentation MCP Server](https://github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server)
+(`awslabs.aws-documentation-mcp-server`) as its primary source of truth for
+verifying claims against current AWS documentation.
+
+### What it does
+
+The MCP server provides two capabilities the Watchdog relies on:
+
+1. **Search** — queries `docs.aws.amazon.com` for a given topic and returns
+   relevant page titles, URLs, and excerpts. Used to find the authoritative
+   page for a claim before fetching it.
+
+2. **Fetch** — retrieves and extracts text content from a specific AWS docs
+   page. Used to get the full context needed to verify a claim.
+
+### How it's used
+
+In GitHub Actions (CI), the Watchdog cannot run a local MCP server process.
+Instead, the `AwsDocsSearcher` class in `source_fetcher.py` replicates the
+same HTTP calls the MCP server makes — direct requests to
+`docs.aws.amazon.com/search/doc-search.html` and page fetches — so the same
+capability works in CI without any additional infrastructure.
+
+The MCP server is used in two places:
+
+**Currency Auditor (`currency_auditor.py`):**
+- During claim extraction, the LLM calls `search_aws_docs` to self-verify
+  claims before outputting them. For example, before flagging "App Runner
+  supports new customers" as a claim, it searches for current App Runner
+  availability and adjusts accordingly.
+- During verification, `ClaimVerifier` fetches the top search result for each
+  `service_name` and `feature_availability` claim, then uses Nova 2 Lite to
+  judge whether the claim is accurate, outdated, or incorrect.
+
+**Analysis Agent (`analysis_agent.py`):**
+- `search_aws_docs` tool — the LLM can search AWS docs on demand during
+  analysis to verify guidance or find current best practices.
+- `check_service_obsolescence` tool — for every service the plugin recommends,
+  searches for current availability status, newer alternatives, and updated
+  best practices.
+
+### Fallback behavior
+
+If the AWS docs search returns no results (which can happen for some queries),
+the `AwsDocsSearcher` falls back to a hardcoded map of known service pages
+(App Runner, Fargate, Lambda, EKS, ECS, Bedrock, AgentCore, Harness, DynamoDB,
+S3, RDS, Aurora, etc.). Claims that don't match any known service page return
+`unverified` rather than a false finding.
+
+### Running locally with the MCP server
+
+If you want to use the actual MCP server locally (e.g., for development or
+testing), install it via `uvx`:
+
+```bash
+uvx awslabs.aws-documentation-mcp-server@latest
+```
+
+The `AwsDocsSearcher` class can be replaced with direct MCP tool calls in a
+local environment where the server is running.
 
 ---
 
