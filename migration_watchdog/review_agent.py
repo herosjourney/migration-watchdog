@@ -177,7 +177,18 @@ REVIEW_SYSTEM_PROMPT = (
     "can make an informed decision\n"
     "6. Check that claims are grounded in the cited sources, not in the primary "
     "model's training data\n\n"
-    "You are a different model (Nova 2 Pro) from the primary agent (Claude "
+    "SELF-AWARE FILE CHECK (model_deprecation and staleness findings):\n"
+    "Before confirming any model_deprecation or staleness finding, check whether "
+    "the finding is about a file that contains 'recompute on each run' or similar "
+    "self-refresh instructions. If the file already correctly marks a model as "
+    "'excluded' or 'legacy' with the right EOL date, the finding is a false "
+    "positive — mark it as 'disputed' with the reason: 'File already correctly "
+    "handles this via its recompute-on-run instructions. The status label is "
+    "accurate; only the header date is cosmetically stale.'\n"
+    "Only confirm model_deprecation findings where the STATUS LABEL itself is "
+    "wrong (e.g., a model past EOL is still marked 'active' or 'legacy' instead "
+    "of 'excluded' or 'eol').\n\n"
+    "You are a different model (Nova 2 Lite) from the primary agent (Claude "
     "Opus 4.7), providing an independent perspective. Focus on factual accuracy "
     "and source grounding, not style.\n\n"
     "IMPORTANT: Do NOT discard findings. Even if you disagree, mark them as "
@@ -402,7 +413,14 @@ def review_findings(
     reviewed: list[Finding] = []
 
     for finding in findings:
-        if finding.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH):
+        # Review medium/high-risk findings AND all model_deprecation findings
+        # (model_deprecation findings are often low-risk but prone to false positives
+        # from self-aware files that recompute their own status on each run)
+        should_review = (
+            finding.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH)
+            or finding.category in ("model_deprecation", "new_model")
+        )
+        if should_review:
             logger.info(
                 "Reviewing %s-risk finding %s: %s",
                 finding.risk_level.value,
@@ -432,6 +450,7 @@ def review_findings(
             1
             for f in findings
             if f.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH)
+            or f.category in ("model_deprecation", "new_model")
         ),
         len(findings),
     )

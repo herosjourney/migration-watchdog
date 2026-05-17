@@ -561,11 +561,18 @@ For each service mentioned in the plugin's reference files, call check_service_o
 3. Identify if AWS has released updated best practices that supersede current guidance
 4. Flag if a recommended service has been deprecated, closed, or superseded
 
-Examples of what to check:
-- "App Runner" → is it still open to new customers? What's the recommended alternative?
-- "Fargate" → are there newer serverless container options?
-- "Claude Sonnet 3.5" → is there a newer recommended model?
-- Manual console steps → has AWS released automation/CLI for this?
+SELF-AWARE FILES — READ INTENT BEFORE FLAGGING:
+Some reference files contain explicit instructions to recompute or refresh their data on each run \
+(e.g., "Recompute the Status column on each run", "Days to EOL = EOL date − today"). \
+Before creating a model_deprecation or staleness finding for such a file:
+1. Check whether the file contains a "recompute on each run" or similar instruction.
+2. If it does, verify whether the COMPUTED VALUES are actually wrong given today's date — \
+   not just whether the header date is old.
+3. If a model is correctly marked `excluded` or `legacy` in the file, do NOT flag it as a \
+   problem — the file is working as designed. Only flag if the status label is WRONG \
+   (e.g., a model past its EOL date is still marked `active` or `legacy` instead of `excluded`).
+4. A stale header date alone (e.g., "as of April 10, 2026") is NOT a finding if the data \
+   values are still correct. Only flag if the data itself is wrong.
 
 CRITICAL GROUNDING RULES:
 - ONLY flag discrepancies you can support with data from the tools (pre-fetched authoritative \
