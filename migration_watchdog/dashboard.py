@@ -1232,81 +1232,139 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
 
     findings_data = [_finding_to_dict(f) for f in enriched_findings]
 
-    risk_badge = {
-        "low": '<span style="color:green;">🟢 Low</span>',
-        "medium": '<span style="color:orange;">🟡 Medium</span>',
-        "high": '<span style="color:red;">🔴 High</span>',
+    # Group findings by agent
+    agent_groups = {
+        "currency": {
+            "label": "💱 Currency Auditor",
+            "description": "Checks factual claims in the reference files against live AWS documentation. Flags things like wrong region counts, deprecated model IDs, stale prices, and services that are no longer available to new customers. These findings are the most urgent — a correctness finding means the plugin is giving users wrong information right now.",
+            "categories": {"currency_drift"},
+            "findings": [],
+        },
+        "automation": {
+            "label": "🤖 Automation Auditor",
+            "description": "Reads migration guides looking for steps that tell users to do things manually — like 'go to the AWS console and click X'. For each manual step, it checks whether an AWS CLI command exists that does the same thing, and whether the generated setup scripts already use it. These findings help make the plugin progressively more automated.",
+            "categories": {"automation_gap"},
+            "findings": [],
+        },
+        "analysis": {
+            "label": "🔍 Analysis Agent",
+            "description": "Compares the plugin's guidance against current AWS best practices, pricing data, and model information. Flags outdated service recommendations, stale pricing tables, deprecated AI models, and missing content areas. These findings keep the plugin's advice aligned with how AWS actually works today.",
+            "categories": {"pricing", "model_deprecation", "new_model", "guidance_update", "new_content", "structural", "core_removal"},
+            "findings": [],
+        },
+        "refactoring": {
+            "label": "🏗️ Refactoring Agent",
+            "description": "Looks at the overall structure of the plugin's reference files and identifies patterns that suggest the organization could be improved. These findings are optional — they're suggestions for making the plugin easier to maintain, not urgent fixes. Previous refactoring suggestions have been declined, so review carefully before approving.",
+            "categories": {"refactoring"},
+            "findings": [],
+        },
     }
 
-    rows = ""
     for f, finding_obj in zip(findings_data, enriched_findings):
-        review_badge = ""
-        if f.get("review_status"):
-            badge_colors = {
-                "confirmed": "green",
-                "corrected": "orange",
-                "disputed": "red",
-            }
-            color = badge_colors.get(f["review_status"], "gray")
-            review_badge = (
-                f'<span style="color:{color}; font-weight:bold;">'
-                f'{f["review_status"]}</span>'
-            )
+        category = f.get("category", "")
+        placed = False
+        for group in agent_groups.values():
+            if category in group["categories"]:
+                group["findings"].append((f, finding_obj))
+                placed = True
+                break
+        if not placed:
+            agent_groups["analysis"]["findings"].append((f, finding_obj))
 
-        extra_info = ""
-        if f.get("review_status") == "disputed" and f.get("primary_reasoning"):
-            extra_info += (
-                "<details><summary>Primary reasoning</summary>"
-                f"<p>{_e(f['primary_reasoning'])}</p></details>"
-            )
-            if f.get("review_notes"):
+    def render_findings_table(group_findings):
+        """Render a findings table for a group."""
+        if not group_findings:
+            return '<p style="color:#888; font-style:italic;">No findings in this category.</p>'
+        table_rows = ""
+        for f, finding_obj in group_findings:
+            review_badge = ""
+            if f.get("review_status"):
+                badge_colors = {"confirmed": "green", "corrected": "orange", "disputed": "red"}
+                color = badge_colors.get(f["review_status"], "gray")
+                review_badge = f'<span style="color:{color}; font-weight:bold;">{f["review_status"]}</span>'
+
+            extra_info = ""
+            if f.get("review_status") == "disputed" and f.get("primary_reasoning"):
                 extra_info += (
-                    "<details><summary>Review reasoning</summary>"
+                    "<details><summary>Primary reasoning</summary>"
+                    f"<p>{_e(f['primary_reasoning'])}</p></details>"
+                )
+                if f.get("review_notes"):
+                    extra_info += (
+                        "<details><summary>Review reasoning</summary>"
+                        f"<p>{_e(f['review_notes'])}</p></details>"
+                    )
+            elif f.get("review_status") == "corrected" and f.get("review_notes"):
+                extra_info += (
+                    "<details><summary>Correction notes</summary>"
                     f"<p>{_e(f['review_notes'])}</p></details>"
                 )
-        elif f.get("review_status") == "corrected" and f.get("review_notes"):
-            extra_info += (
-                "<details><summary>Correction notes</summary>"
-                f"<p>{_e(f['review_notes'])}</p></details>"
+
+            payload_html = _render_auditor_payload(
+                f.get("auditor_payload"),
+                f.get("finding_schema_version"),
+                finding_obj,
             )
+            if payload_html:
+                extra_info += payload_html
 
-        # Render auditor payload detail panel (currency or automation).
-        payload_html = _render_auditor_payload(
-            f.get("auditor_payload"),
-            f.get("finding_schema_version"),
-            finding_obj,
-        )
-        if payload_html:
-            extra_info += payload_html
+            dismissal_active = bool(f.get("dismissal_active", False))
+            badges_html = _render_list_badges(finding_obj, dismissal_active=dismissal_active)
 
-        # Render inline badges for the row.
-        dismissal_active = bool(f.get("dismissal_active", False))
-        badges_html = _render_list_badges(finding_obj, dismissal_active=dismissal_active)
+            risk_badge_map = {
+                "low": '<span style="color:green;">🟢 Low</span>',
+                "medium": '<span style="color:orange;">🟡 Medium</span>',
+                "high": '<span style="color:red;">🔴 High</span>',
+            }
 
-        rows += f"""
-        <tr>
-            <td>{risk_badge.get(f['risk_level'], f['risk_level'])}</td>
-            <td>{review_badge}</td>
-            <td>{_e(f['title'])}</td>
-            <td>{_e(', '.join(f['affected_files']))}</td>
-            <td>{_e(f['scan_date'])}</td>
-            <td>{_e(f['status'])}</td>
-            <td>{badges_html}</td>
-            <td>
-                <button onclick="approve('{_e(f['finding_id'])}')">Approve</button>
-                <button onclick="decline('{_e(f['finding_id'])}')">Decline</button>
-                <p style="font-size:0.8em; color:#555; margin:4px 0 0 0;">
-                    Approving queues a fix PR. Merging that PR is a separate step on GitHub.
-                </p>
-            </td>
-        </tr>
-        """
-        if extra_info:
-            rows += f"""
-        <tr>
-            <td colspan="8" style="padding:4px 12px; background:#fafafa;">{extra_info}</td>
-        </tr>
-        """
+            table_rows += f"""
+            <tr>
+                <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
+                <td>{review_badge}</td>
+                <td>{_e(f['title'])}</td>
+                <td style="font-size:0.8em;">{_e(', '.join(f['affected_files']))}</td>
+                <td style="font-size:0.8em;">{_e(f['scan_date'])}</td>
+                <td>{_e(f['status'])}</td>
+                <td>{badges_html}</td>
+                <td>
+                    <button onclick="approve('{_e(f['finding_id'])}')">Approve</button>
+                    <button onclick="decline('{_e(f['finding_id'])}')">Decline</button>
+                </td>
+            </tr>"""
+            if extra_info:
+                table_rows += f"""
+            <tr>
+                <td colspan="8" style="padding:4px 12px; background:#fafafa;">{extra_info}</td>
+            </tr>"""
+
+        return f"""<table>
+            <thead><tr>
+                <th>Risk</th><th>Review</th><th>Title</th><th>Affected Files</th>
+                <th>Scan Date</th><th>Status</th><th>Badges</th><th>Actions</th>
+            </tr></thead>
+            <tbody>{table_rows}</tbody>
+        </table>"""
+
+    # Build tab content
+    tab_buttons = ""
+    tab_panels = ""
+    first = True
+    all_finding_ids = [f['finding_id'] for f, _ in sum([g["findings"] for g in agent_groups.values()], [])]
+
+    for key, group in agent_groups.items():
+        count = len(group["findings"])
+        active_class = "tab-btn active" if first else "tab-btn"
+        panel_style = "" if first else "display:none;"
+        first = False
+        tab_buttons += f'<button class="{active_class}" onclick="showTab(\'{key}\')">{group["label"]} <span class="tab-count">({count})</span></button>'
+        tab_panels += f"""
+        <div id="tab-{key}" class="tab-panel" style="{panel_style}">
+            <div style="background:#f0f4ff; border-left:4px solid #1565c0; padding:10px 14px; margin-bottom:12px; border-radius:4px;">
+                <strong>{group["label"]}</strong><br>
+                <span style="color:#444; font-size:0.9em;">{group["description"]}</span>
+            </div>
+            {render_findings_table(group["findings"])}
+        </div>"""
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1315,38 +1373,86 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Watchdog Dashboard</title>
     <style>
-        body {{ font-family: sans-serif; margin: 2rem; }}
+        body {{ font-family: sans-serif; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }}
+        .layout {{ display: flex; flex: 1; }}
+        .sidebar {{ width: 260px; min-width: 220px; background: #f8f9fa; border-right: 1px solid #ddd; padding: 16px; overflow-y: auto; }}
+        .sidebar h2 {{ font-size: 1em; margin: 0 0 12px 0; color: #333; }}
+        .run-item {{ padding: 8px 10px; margin: 4px 0; border-radius: 4px; cursor: pointer; border: 1px solid #ddd; background: white; font-size: 0.85em; }}
+        .run-item:hover {{ background: #e3f2fd; border-color: #1565c0; }}
+        .run-item.active {{ background: #1565c0; color: white; border-color: #1565c0; }}
+        .run-item .run-date {{ font-weight: bold; }}
+        .run-item .run-meta {{ color: #666; font-size: 0.9em; }}
+        .run-item.active .run-meta {{ color: #cce; }}
+        .run-all {{ padding: 8px 10px; margin: 4px 0; border-radius: 4px; cursor: pointer; border: 1px solid #1565c0; background: #e3f2fd; font-size: 0.85em; font-weight: bold; color: #1565c0; }}
+        .run-all:hover {{ background: #1565c0; color: white; }}
+        .main {{ flex: 1; padding: 1.5rem; overflow-x: auto; min-width: 0; }}
         table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-        th {{ background-color: #f4f4f4; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }}
+        th {{ background-color: #f4f4f4; white-space: nowrap; }}
         button {{ margin: 2px; padding: 4px 10px; cursor: pointer; }}
+        button.danger {{ background: #ffebee; border: 1px solid #c62828; color: #c62828; }}
+        button.danger:hover {{ background: #c62828; color: white; }}
         details {{ margin-top: 4px; font-size: 0.9em; }}
+        .toolbar {{ display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }}
+        .tabs {{ display: flex; gap: 4px; margin-bottom: 0; flex-wrap: wrap; border-bottom: 2px solid #1565c0; padding-bottom: 0; }}
+        .tab-btn {{ padding: 8px 16px; border: 1px solid #ddd; border-bottom: none; background: #f5f5f5; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 0.9em; }}
+        .tab-btn:hover {{ background: #e3f2fd; }}
+        .tab-btn.active {{ background: #1565c0; color: white; border-color: #1565c0; font-weight: bold; }}
+        .tab-count {{ font-size: 0.85em; opacity: 0.85; }}
+        .tab-panel {{ padding: 16px 0; }}
     </style>
 </head>
 <body>
     {_render_pr_sticky_banner(scan_run)}
-    <h1>Migration Plugin Watchdog Dashboard</h1>
-    {_render_partial_data_warning(scan_run)}
-    {_render_merge_checklist(scan_run, enriched_findings)}
-    <p>Total findings: {len(findings_data)}</p>
-    <table>
-        <thead>
-            <tr>
-                <th>Risk</th>
-                <th>Review</th>
-                <th>Title</th>
-                <th>Affected Files</th>
-                <th>Scan Date</th>
-                <th>Status</th>
-                <th>Badges</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows}
-        </tbody>
-    </table>
+    <div class="layout">
+        <div class="sidebar">
+            <h2>📋 Scan Runs</h2>
+            <div class="run-all" onclick="window.location='/dashboard'">All findings</div>
+            <div id="runs-list">Loading...</div>
+        </div>
+        <div class="main">
+            <h1 style="margin-top:0;">Migration Plugin Watchdog</h1>
+            {_render_partial_data_warning(scan_run)}
+            {_render_merge_checklist(scan_run, enriched_findings)}
+            <div class="toolbar">
+                <span><strong>{len(findings_data)}</strong> total findings</span>
+                {'<span style="color:#1565c0; font-weight:bold;">📅 Run: ' + _e(run_id[:8]) + '...</span>' if run_id else ''}
+                <button class="danger" onclick="declineAll()" title="Decline all visible findings">🗑 Decline all visible</button>
+            </div>
+            <div class="tabs">{tab_buttons}</div>
+            {tab_panels}
+        </div>
+    </div>
     <script>
+        function showTab(key) {{
+            document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('tab-' + key).style.display = '';
+            event.target.classList.add('active');
+        }}
+
+        fetch('/api/runs').then(r => r.json()).then(data => {{
+            const el = document.getElementById('runs-list');
+            if (!data.runs || data.runs.length === 0) {{
+                el.innerHTML = '<p style="color:#999;font-size:0.85em;">No runs yet</p>';
+                return;
+            }}
+            const currentRunId = new URLSearchParams(window.location.search).get('run_id');
+            el.innerHTML = data.runs.map(run => {{
+                const date = run.start_timestamp ? run.start_timestamp.substring(0, 16).replace('T', ' ') : 'unknown';
+                const count = run.findings_count || 0;
+                const status = run.status || '';
+                const statusIcon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '🔄';
+                const isActive = run.run_id === currentRunId;
+                return `<div class="run-item ${{isActive ? 'active' : ''}}" onclick="window.location='/dashboard?run_id=${{run.run_id}}'">
+                    <div class="run-date">${{statusIcon}} ${{date}}</div>
+                    <div class="run-meta">${{count}} findings · ${{run.run_id.substring(0,8)}}</div>
+                </div>`;
+            }}).join('');
+        }}).catch(() => {{
+            document.getElementById('runs-list').innerHTML = '<p style="color:#999;font-size:0.85em;">Could not load runs</p>';
+        }});
+
         async function approve(findingId) {{
             const resp = await fetch('/api/findings/' + findingId + '/approve', {{method: 'POST'}});
             const data = await resp.json();
@@ -1354,9 +1460,15 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             location.reload();
         }}
         async function decline(findingId) {{
-            const resp = await fetch('/api/findings/' + findingId + '/decline', {{method: 'POST'}});
-            const data = await resp.json();
-            alert('Finding declined');
+            await fetch('/api/findings/' + findingId + '/decline', {{method: 'POST'}});
+            location.reload();
+        }}
+        async function declineAll() {{
+            const ids = {all_finding_ids};
+            if (!confirm('Decline all ' + ids.length + ' visible findings?')) return;
+            for (const id of ids) {{
+                await fetch('/api/findings/' + id + '/decline', {{method: 'POST'}});
+            }}
             location.reload();
         }}
     </script>
