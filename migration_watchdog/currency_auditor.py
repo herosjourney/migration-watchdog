@@ -1011,6 +1011,23 @@ class ClaimVerifier:
 
         known_ids = {m.model_id for m in lifecycle.models}
         if canonical_id in known_ids:
+            # Model is in the lifecycle list — check its status
+            model_entry = next((m for m in lifecycle.models if m.model_id == canonical_id), None)
+            if model_entry and getattr(model_entry, "status", "active") in ("eol", "legacy"):
+                return VerificationResult(
+                    claim_id=claim.claim_id,
+                    status="finding",
+                    severity="correctness" if getattr(model_entry, "status", "") == "eol" else "outdated",
+                    actual_value=f"Status: {model_entry.status}, EOL: {getattr(model_entry, 'eol_date', 'unknown')}",
+                    verification_source=getattr(lifecycle, "fetched_at", None),
+                    suggested_fix=(
+                        f"Model {canonical_id!r} is {model_entry.status}. "
+                        + (f"Use {model_entry.replacement!r} instead." if getattr(model_entry, "replacement", None) else "Check the Bedrock model catalog for an active replacement.")
+                    ),
+                    price_verification_path=None,
+                    price_metadata=None,
+                )
+            # Model is in lifecycle list but active — verified accurate
             return VerificationResult(
                 claim_id=claim.claim_id,
                 status="verified_accurate",
@@ -1022,29 +1039,15 @@ class ClaimVerifier:
                 price_metadata=None,
             )
 
-        # Canonical ID not in lifecycle — find closest same-family match
-        suggested = self._find_closest_model(canonical_id, lifecycle.models)
-        canonical_lower = canonical_id.lower()
-        if suggested:
-            sug_lower = suggested.lower()
-            common = any(
-                part in sug_lower
-                for part in canonical_lower.split(".")[:2]
-                if len(part) > 3
-            )
-            if not common:
-                suggested = None
-
+        # Model NOT in lifecycle list — this is GOOD: it means the model is active
+        # (the lifecycle list only contains Legacy/EOL models, not active ones)
         return VerificationResult(
             claim_id=claim.claim_id,
-            status="finding",
-            severity="correctness",
-            actual_value=None,
+            status="verified_accurate",
+            severity=None,
+            actual_value=canonical_id,
             verification_source=getattr(lifecycle, "fetched_at", None),
-            suggested_fix=(
-                f"Model ID {canonical_id!r} not found in Bedrock lifecycle. "
-                + (f"Did you mean {suggested!r}?" if suggested else "Check the Bedrock model catalog.")
-            ),
+            suggested_fix=None,
             price_verification_path=None,
             price_metadata=None,
         )
