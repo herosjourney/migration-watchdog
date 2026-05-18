@@ -154,7 +154,7 @@ class TestPRModeSmoke:
             full_path.write_text(_SAMPLE_MD, encoding="utf-8")
 
         # Write pricing cache
-        pricing_path = tmp_path / "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
+        pricing_path = tmp_path / "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
         pricing_path.parent.mkdir(parents=True, exist_ok=True)
         pricing_path.write_text(_SAMPLE_PRICING_CACHE, encoding="utf-8")
 
@@ -208,13 +208,13 @@ class TestPRModeSmoke:
 
     def test_pr_mode_completes_without_crash(self, tmp_path):
         """run_scan() in PR mode must complete without raising or calling sys.exit(1)."""
-        changed = ["features/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
+        changed = ["migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
         report = self._run_with_pr_env(tmp_path, changed)
         assert "run_id" in report
 
     def test_audit_report_json_written(self, tmp_path):
         """audit-report.json must be written with the expected top-level keys."""
-        changed = ["features/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
+        changed = ["migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
         report = self._run_with_pr_env(tmp_path, changed)
 
         assert "run_id" in report, "run_id must be present"
@@ -226,24 +226,18 @@ class TestPRModeSmoke:
 
     def test_audit_report_findings_is_list(self, tmp_path):
         """findings in audit-report.json must be a list (even when empty)."""
-        changed = ["features/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
+        changed = ["migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
         report = self._run_with_pr_env(tmp_path, changed)
         assert isinstance(report["findings"], list)
 
     def test_no_partial_source_failures_nameerror(self, tmp_path):
-        """Regression: partial_source_failures must be defined before currency audit runs.
-
-        If the NameError bug is present, run_scan() will call sys.exit(1) and
-        the test will fail via the SystemExit handler above.
-        """
-        # Simulate currency audit recording partial failures
+        """Regression: partial_source_failures must be defined before currency audit runs."""
         _mw_currency.run_currency_audit.return_value = []
-        # Attach a fake last_partial_source_failures with a dict entry
         _mw_currency.run_currency_audit.last_partial_source_failures = [
             {"type": "migration_context_failure", "file": "test.md"}
         ]
 
-        changed = ["features/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
+        changed = ["migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
         try:
             report = self._run_with_pr_env(tmp_path, changed)
             # If we get here, no NameError occurred
@@ -254,7 +248,7 @@ class TestPRModeSmoke:
 
     def test_pr_checkout_loads_pricing_cache(self, tmp_path):
         """PR checkout mode must load pricing-cache.md alongside changed files."""
-        changed = ["features/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
+        changed = ["migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md"]
 
         # Track what files were loaded into RepoContent
         loaded_files: dict = {}
@@ -272,7 +266,7 @@ class TestPRModeSmoke:
             _mw_currency.run_currency_audit = original_run_currency
 
         # pricing-cache.md must be in the snapshot
-        pricing_key = "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
+        pricing_key = "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
         assert any(pricing_key in k or "pricing-cache" in k for k in loaded_files), (
             f"pricing-cache.md must be loaded in PR checkout mode. "
             f"Loaded files: {list(loaded_files.keys())}"
