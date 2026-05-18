@@ -595,36 +595,51 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
             f"<p><strong>Placeholders:</strong> {escaped_placeholders}</p>"
         )
 
-    # --- Judgment inputs section (always shown) ---
+    # --- Plain-English assessment ---
     judgment_required = payload.get("judgment_required")
     repeated_operation = payload.get("repeated_operation")
     values_precomputed = payload.get("values_precomputed")
     safety_impact = payload.get("safety_impact")
+    automate_recommended = payload.get("automate_recommended")
 
-    judgment_rows = ""
-    if judgment_required is not None:
-        judgment_rows += f"<tr><td>judgment_required</td><td>{_e(str(judgment_required))}</td></tr>"
-    if repeated_operation is not None:
-        judgment_rows += f"<tr><td>repeated_operation</td><td>{_e(str(repeated_operation))}</td></tr>"
-    if values_precomputed is not None:
-        judgment_rows += f"<tr><td>values_precomputed</td><td>{_e(str(values_precomputed))}</td></tr>"
-    if safety_impact is not None:
-        judgment_rows += f"<tr><td>safety_impact</td><td>{_e(str(safety_impact))}</td></tr>"
+    assessment_lines = []
+    if judgment_required is True:
+        assessment_lines.append("⚠️ Requires human judgment before executing — values or decisions can't be determined automatically.")
+    elif judgment_required is False:
+        assessment_lines.append("✅ No human judgment needed — this step can be fully automated.")
 
-    parts.append(
-        "<p><strong>Judgment inputs:</strong></p>"
-        '<table style="border-collapse:collapse; font-size:0.9em;">'
-        f"{judgment_rows}"
-        "</table>"
-    )
+    if repeated_operation is True:
+        assessment_lines.append("🔁 This is a repeated operation — automating it would save significant time across multiple runs.")
+    
+    if values_precomputed is False and judgment_required is False:
+        assessment_lines.append("📋 Input values need to be looked up or calculated before running the CLI command.")
+    elif values_precomputed is True:
+        assessment_lines.append("✅ All required input values are already available.")
+
+    if safety_impact:
+        safety_labels = {
+            "quota_increase": "⚠️ Safety consideration: this action increases a service quota — review limits before automating.",
+            "iam_change": "⚠️ Safety consideration: this action modifies IAM permissions — requires careful review.",
+            "data_deletion": "🔴 Safety consideration: this action deletes data — should never be automated without confirmation.",
+            "cost_impact": "💰 Safety consideration: this action may incur costs — verify pricing before automating.",
+        }
+        label = safety_labels.get(safety_impact, f"⚠️ Safety consideration: {_e(safety_impact)}")
+        assessment_lines.append(label)
+
+    if assessment_lines:
+        parts.append(
+            '<div style="background:#f5f5f5; border-left:3px solid #888; padding:8px 12px; margin:8px 0; border-radius:3px;">'
+            '<strong>Assessment:</strong><br>'
+            + '<br>'.join(assessment_lines)
+            + '</div>'
+        )
 
     # --- Automate recommendation ---
-    automate_recommended = payload.get("automate_recommended")
     if automate_recommended is not None:
-        icon = "✅ Yes" if automate_recommended == "yes" else "❌ No"
-        parts.append(
-            f"<p><strong>Automate:</strong> {icon}</p>"
-        )
+        if automate_recommended == "yes":
+            parts.append('<p><strong>Recommendation:</strong> ✅ This step should be automated.</p>')
+        else:
+            parts.append('<p><strong>Recommendation:</strong> ❌ Keep this step manual — automation is not recommended here.</p>')
 
     # --- Human gate warning ---
     if payload.get("human_gate") == "required":
