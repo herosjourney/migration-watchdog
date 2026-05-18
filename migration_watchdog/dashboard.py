@@ -662,28 +662,98 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
     )
 
 
-def _render_general_finding_detail(finding: Finding) -> str:
+def _format_description(description: str) -> str:
+    """Format a finding description as readable HTML.
+
+    Handles:
+    - JSON escape sequences (\\n, \\u2014, etc.)
+    - **Bold** markdown
+    - `code` backtick spans
+    - Numbered lists (1. 2. 3.)
+    - Bullet lists (- item)
+    - Section headers (Advantages:, Disadvantages:, etc.)
+    - Paragraph breaks (double newline)
+    """
+    import re as _re
+    import json as _json
+
+    # Decode JSON escape sequences if present
+    try:
+        if '\\n' in description or '\\u' in description:
+            description = _json.loads(f'"{description}"')
+    except Exception:
+        pass
+
+    # Split into lines for processing
+    lines = description.split('\n')
+    html_parts: list[str] = []
+    in_list = False
+    list_type = None  # 'ul' or 'ol'
+
+    def close_list():
+        nonlocal in_list, list_type
+        if in_list:
+            html_parts.append(f'</{list_type}>')
+            in_list = False
+            list_type = None
+
+    def format_inline(text: str) -> str:
+        """Format inline markdown: **bold**, `code`."""
+        text = _e(text)
+        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+        text = _re.sub(r'`([^`]+)`', r'<code style="background:#f0f0f0;padding:1px 3px;border-radius:2px;">\1</code>', text)
+        return text
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            close_list()
+            continue
+
+        # Section headers like "Advantages:", "Disadvantages:", "Proposed structure:"
+        header_match = _re.match(r'^(Advantages|Disadvantages|Proposed structure|Summary|Background|Impact|Solution|Recommendation)s?:\s*(.*)$', stripped, _re.IGNORECASE)
+        if header_match:
+            close_list()
+            label = header_match.group(1)
+            rest = header_match.group(2)
+            html_parts.append(f'<p style="margin:10px 0 4px 0;"><strong>{_e(label)}:</strong> {format_inline(rest)}</p>' if rest else f'<p style="margin:10px 0 4px 0;"><strong>{_e(label)}:</strong></p>')
+            continue
+
+        # Numbered list items: "1. text" or "(1) text"
+        num_match = _re.match(r'^[\(\[]?(\d+)[\)\]\.]\s+(.+)$', stripped)
+        if num_match:
+            if not in_list or list_type != 'ol':
+                close_list()
+                html_parts.append('<ol style="margin:4px 0; padding-left:20px;">')
+                in_list = True
+                list_type = 'ol'
+            html_parts.append(f'<li style="margin:3px 0;">{format_inline(num_match.group(2))}</li>')
+            continue
+
+        # Bullet list items: "- text" or "* text"
+        bullet_match = _re.match(r'^[-*•]\s+(.+)$', stripped)
+        if bullet_match:
+            if not in_list or list_type != 'ul':
+                close_list()
+                html_parts.append('<ul style="margin:4px 0; padding-left:20px;">')
+                in_list = True
+                list_type = 'ul'
+            html_parts.append(f'<li style="margin:3px 0;">{format_inline(bullet_match.group(1))}</li>')
+            continue
+
+        # Regular paragraph text
+        close_list()
+        html_parts.append(f'<p style="margin:6px 0;">{format_inline(stripped)}</p>')
+
+    close_list()
+    return '\n'.join(html_parts)
     """Render a ``<details>`` panel for non-currency/automation findings."""
     parts: list[str] = []
 
     # --- Description (the main content) ---
     description = finding.description
     if description:
-        import re as _re
-        import json as _json
-        # Decode JSON escape sequences (\n, \u2014, etc.) if present
-        try:
-            if '\\n' in description or '\\u' in description:
-                description = _json.loads(f'"{description}"')
-        except Exception:
-            pass
-        desc_html = _e(description)
-        # Format **bold** markdown
-        desc_html = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', desc_html)
-        # Convert newlines to paragraphs
-        paragraphs = [p.strip() for p in desc_html.split('\n\n') if p.strip()]
-        formatted = ''.join(f'<p>{p.replace(chr(10), "<br>")}</p>' for p in paragraphs)
-        parts.append(f'<div style="margin-bottom:8px;">{formatted}</div>')
+        parts.append(f'<div style="margin-bottom:8px;">{_format_description(description)}</div>')
 
     # --- Dispute reason (shown prominently when disputed) ---
     review_status = finding.review_status
