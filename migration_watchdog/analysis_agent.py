@@ -367,6 +367,61 @@ def search_aws_docs(query: str) -> str:
 
 
 @tool
+def search_gcp_docs(query: str) -> str:
+    """Search Google Cloud documentation to verify GCP-side claims in the migration plugin.
+
+    Use this tool to verify claims about GCP services like Cloud Run, Cloud SQL,
+    GKE, Vertex AI, Gemini, Pub/Sub, Firestore, etc. The migration plugin makes
+    claims about GCP services as the source of migration — these need to be accurate.
+
+    Args:
+        query: A specific search query, e.g. "Cloud Run pricing 2026",
+               "Gemini 2.0 Flash context window", "GKE autopilot features",
+               "Cloud SQL PostgreSQL compatibility"
+
+    Returns:
+        Relevant text excerpts from Google Cloud documentation.
+    """
+    # Use the AwsDocsSearcher's fetch_page for GCP docs since they're plain HTTP
+    from migration_watchdog.source_fetcher import GCP_DOC_URLS
+    query_lower = query.lower()
+    results: list[str] = []
+
+    # Try to find a relevant GCP docs page
+    for service, url in GCP_DOC_URLS.items():
+        if service.replace("_", " ") in query_lower or service in query_lower:
+            content = _analysis_docs_searcher.fetch_page(url)
+            if content:
+                results.append(f"[{service}] {content[:1500]}")
+            break
+
+    # Also try a web search for GCP-specific queries
+    if not results:
+        import httpx as _httpx
+        try:
+            with _httpx.Client(timeout=8.0) as client:
+                resp = client.post(
+                    "https://html.duckduckgo.com/html/",
+                    data={"q": f"site:cloud.google.com {query}"},
+                    headers={"User-Agent": "MigrationPluginWatchdog/1.0"},
+                )
+                if resp.status_code == 200:
+                    import re as _re
+                    snippets = _re.findall(
+                        r'class="result__snippet"[^>]*>(.*?)</span>',
+                        resp.text, _re.DOTALL
+                    )
+                    for s in snippets[:3]:
+                        clean = _re.sub(r'<[^>]+>', '', s).strip()
+                        if clean:
+                            results.append(clean)
+        except Exception:
+            pass
+
+    return '\n\n'.join(results) if results else "No GCP documentation found for this query."
+
+
+@tool
 def check_service_obsolescence(
     service_name: str,
     current_recommendation: str,
@@ -548,6 +603,9 @@ Your tasks:
 using the check_new_content_opportunities tool
 - Use the search_aws_docs tool to search AWS documentation for current service status, \
   newer alternatives, and updated best practices
+- Use the search_gcp_docs tool to verify GCP-side claims — the plugin makes claims about \
+  GCP services (Cloud Run, Cloud SQL, GKE, Gemini, Vertex AI, etc.) as migration sources. \
+  Use this tool to verify those claims are still accurate before flagging them as issues.
 - Use the check_service_obsolescence tool for EVERY service the plugin recommends — \
   proactively check whether newer AWS services or features make the current guidance obsolete
 - Use the web_search tool to verify claims or find current information when pre-fetched data \
@@ -607,6 +665,7 @@ def create_analysis_agent() -> Agent:
             compare_design_ref,
             check_new_content_opportunities,
             search_aws_docs,
+            search_gcp_docs,
             check_service_obsolescence,
             web_search,
             create_finding,
@@ -778,11 +837,13 @@ def _build_models_prompt(
     """Build a focused prompt for AI model staleness analysis only."""
     sections: list[str] = [f"## Model Staleness Analysis for Run: {run_id}\n"]
 
-    # Only include AI-related files
+    # Only include AI-related files — use higher truncation limit since these files are large
     ai_keywords = ["ai-gemini", "ai-openai", "ai-model-lifecycle", "ai.md"]
     for path, content in repo_content.files.items():
         if any(kw in path for kw in ai_keywords):
-            sections.append(f"### File: {path}\n```\n{content[:6000]}\n```\n")
+            # ai-gemini-to-bedrock.md and ai-openai-to-bedrock.md are ~14-18KB
+            # Use 12000 chars to capture most of the content
+            sections.append(f"### File: {path}\n```\n{content[:12000]}\n```\n")
 
     if authoritative_data.gemini_models.models or authoritative_data.gemini_models.pricing:
         sections.append(
@@ -866,6 +927,9 @@ def _build_guidance_prompt(
         "For EVERY service mentioned in the design-ref files, call check_service_obsolescence "
         "to verify it is still available to new customers and that no newer/better alternative "
         "exists. Use search_aws_docs to find current service status and updated best practices. "
+        "Use search_gcp_docs to verify GCP-side claims (Cloud Run, Cloud SQL, GKE, Gemini, etc.) "
+        "are still accurate — the plugin's migration rationale depends on correctly describing "
+        "the GCP source services. "
         "Use compare_design_ref tool and web_search to verify. "
         "Create findings for outdated guidance and obsolete service recommendations. "
         "Every finding must have source_urls."

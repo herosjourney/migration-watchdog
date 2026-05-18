@@ -66,6 +66,19 @@ BEDROCK_LIFECYCLE_URL = (
 AWS_BLOGS_URL = "https://aws.amazon.com/blogs/"
 AWS_WHATS_NEW_URL = "https://aws.amazon.com/new/"
 
+# GCP documentation URLs for verifying GCP-side claims in the migration plugin
+GCP_DOC_URLS: dict[str, str] = {
+    "cloud_run": "https://cloud.google.com/run/docs/overview/what-is-cloud-run",
+    "cloud_sql": "https://cloud.google.com/sql/docs/introduction",
+    "gke": "https://cloud.google.com/kubernetes-engine/docs/concepts/kubernetes-engine-overview",
+    "vertex_ai": "https://cloud.google.com/vertex-ai/docs/start/introduction-unified-platform",
+    "cloud_spanner": "https://cloud.google.com/spanner/docs/whatis",
+    "firestore": "https://cloud.google.com/firestore/docs/overview",
+    "cloud_storage": "https://cloud.google.com/storage/docs/introduction",
+    "pub_sub": "https://cloud.google.com/pubsub/docs/overview",
+    "cloud_functions": "https://cloud.google.com/functions/docs/concepts/overview",
+}
+
 # Keywords for filtering relevant blog/What's New posts
 RELEVANCE_KEYWORDS: list[str] = [
     "bedrock",
@@ -446,6 +459,7 @@ class SourceFetcher:
             self._safe_fetch_openai_data(),
             self._safe_fetch_bedrock_lifecycle(),
             self._safe_fetch_aws_pricing(),
+            self._safe_fetch_gcp_docs(),
             return_exceptions=False,
         )
 
@@ -455,6 +469,7 @@ class SourceFetcher:
         openai_data = results[3]
         bedrock_lifecycle = results[4]
         aws_pricing = results[5]
+        gcp_docs = results[6]
 
         try:
             await self._close_client()
@@ -469,6 +484,7 @@ class SourceFetcher:
             openai_models=openai_data,
             bedrock_lifecycle=bedrock_lifecycle,
             aws_pricing=aws_pricing,
+            gcp_docs=gcp_docs,
             partial_failures=list(self.partial_failures),
         )
 
@@ -518,6 +534,13 @@ class SourceFetcher:
             return await self.fetch_aws_pricing(list(AWS_PRICING_SERVICE_CODES.keys()))
         except Exception as exc:  # noqa: BLE001
             self._record_failure("aws_pricing", exc)
+            return {}
+
+    async def _safe_fetch_gcp_docs(self) -> dict[str, str]:
+        try:
+            return await self.fetch_gcp_docs(list(GCP_DOC_URLS.keys()))
+        except Exception as exc:  # noqa: BLE001
+            self._record_failure("gcp_docs", exc)
             return {}
 
     # ------------------------------------------------------------------
@@ -805,6 +828,32 @@ class SourceFetcher:
 
         return entries
 
+    async def fetch_gcp_docs(self, services: list[str]) -> dict[str, str]:
+        """Fetch GCP documentation for specified services.
+
+        Used to verify GCP-side claims in the migration plugin — e.g., whether
+        Cloud Run still works the same way, or whether Gemini pricing has changed.
+
+        Args:
+            services: List of service keys from GCP_DOC_URLS.
+
+        Returns:
+            A dict mapping service name to extracted text content.
+        """
+        result: dict[str, str] = {}
+        for service in services:
+            url = GCP_DOC_URLS.get(service)
+            if url is None:
+                continue
+            try:
+                html = await self._fetch_url(url)
+                content = extract_text_from_html(html)[:4000]
+                result[service] = content
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to fetch GCP docs for %s: %s", service, exc)
+                self._record_failure(f"gcp_docs_{service}", exc)
+        return result
+
     async def fetch_aws_pricing(self, services: list[str]) -> dict[str, dict]:
         """Query the AWS Pricing API for specified services.
 
@@ -836,25 +885,95 @@ class SourceFetcher:
     async def _fetch_service_pricing(
         self, service: str, service_code: str
     ) -> dict[str, Any]:
-        """Fetch pricing for a single AWS service via the Pricing API."""
+        """Fetch pricing for a single AWS service via the Pricing API.
+
+        Uses service-specific filters to return the exact pricing dimensions
+        that the plugin's pricing-cache.md tracks (e.g., Fargate per-vCPU-hour,
+        Lambda per-GB-second, etc.) rather than the first page of all SKUs.
+        """
+        # Service-specific filters to get the right pricing dimensions.
+        # Each entry is a list of additional TERM_MATCH filters beyond regionCode.
+        _SERVICE_FILTERS: dict[str, list[dict]] = {
+            "fargate": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonECS:Fargate-vCPU-Hours:perCPU"},
+            ],
+            "lambda": [
+                {"Type": "TERM_MATCH", "Field": "group", "Value": "AWS-Lambda-Duration"},
+            ],
+            "dynamodb": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonDynamoDB:WriteRequestUnits"},
+            ],
+            "s3": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonS3:TimedStorage-ByteHrs"},
+            ],
+            "bedrock": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonBedrock:InputTokens"},
+            ],
+            "ecs": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonECS:Fargate-vCPU-Hours:perCPU"},
+            ],
+            "eks": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonEKS:AmazonEKS-Hours:perCluster"},
+            ],
+            "aurora": [
+                {"Type": "TERM_MATCH", "Field": "databaseEngine", "Value": "Aurora MySQL"},
+                {"Type": "TERM_MATCH", "Field": "instanceType", "Value": "db.r6g.large"},
+            ],
+            "rds": [
+                {"Type": "TERM_MATCH", "Field": "databaseEngine", "Value": "MySQL"},
+                {"Type": "TERM_MATCH", "Field": "instanceType", "Value": "db.t4g.micro"},
+            ],
+            "sagemaker": [
+                {"Type": "TERM_MATCH", "Field": "usagetype", "Value": "AmazonSageMaker:ml.t3.medium"},
+            ],
+        }
+
+        extra_filters = _SERVICE_FILTERS.get(service, [])
 
         def _query_pricing() -> dict[str, Any]:
             client = boto3.client("pricing", region_name="us-east-1")
+            filters = [
+                {
+                    "Type": "TERM_MATCH",
+                    "Field": "regionCode",
+                    "Value": "us-east-1",
+                },
+            ] + extra_filters
+
             response = client.get_products(
                 ServiceCode=service_code,
-                Filters=[
-                    {
-                        "Type": "TERM_MATCH",
-                        "Field": "regionCode",
-                        "Value": "us-east-1",
-                    },
-                ],
-                MaxResults=10,
+                Filters=filters,
+                MaxResults=5,
             )
+            price_list = response.get("PriceList", [])
+
+            # Parse the price list to extract numeric values
+            parsed_prices: dict[str, float] = {}
+            import json as _json
+            for item_str in price_list:
+                try:
+                    item = _json.loads(item_str) if isinstance(item_str, str) else item_str
+                    terms = item.get("terms", {}).get("OnDemand", {})
+                    for term in terms.values():
+                        for dim in term.get("priceDimensions", {}).values():
+                            desc = dim.get("description", "")
+                            price_per_unit = dim.get("pricePerUnit", {}).get("USD", "0")
+                            try:
+                                price_val = float(price_per_unit)
+                                if price_val > 0:
+                                    # Use description as key, truncated
+                                    key = desc[:60].strip().lower().replace(" ", "_")
+                                    parsed_prices[key] = price_val
+                            except (ValueError, TypeError):
+                                pass
+                except Exception:
+                    pass
+
             return {
                 "service": service,
                 "service_code": service_code,
-                "price_list": response.get("PriceList", []),
+                "price_list": price_list,
+                "parsed_prices": parsed_prices,
             }
 
         async def _async_query() -> dict[str, Any]:

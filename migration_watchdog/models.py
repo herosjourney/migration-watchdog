@@ -143,6 +143,7 @@ class AuthoritativeData:
     openai_models: OpenAIModelData = field(default_factory=OpenAIModelData)
     bedrock_lifecycle: BedrockLifecycle = field(default_factory=BedrockLifecycle)
     aws_pricing: dict[str, dict] = field(default_factory=dict)  # service -> pricing data
+    gcp_docs: dict[str, str] = field(default_factory=dict)  # service -> content
     partial_failures: list[str] = field(default_factory=list)
 
 
