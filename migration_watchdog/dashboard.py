@@ -1438,7 +1438,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 return;
             }}
             const currentRunId = new URLSearchParams(window.location.search).get('run_id');
-            el.innerHTML = data.runs.map(run => {{
+            el.innerHTML = data.runs.slice(0, 5).map(run => {{
                 const date = run.start_timestamp ? run.start_timestamp.substring(0, 16).replace('T', ' ') : 'unknown';
                 const count = run.findings_count || 0;
                 const status = run.status || '';
