@@ -739,17 +739,18 @@ def _render_general_finding_detail(finding: Finding) -> str:
         f'<div style="padding:8px 12px; border:1px solid #e0e0e0; border-radius:4px; margin-top:4px;">{inner}</div>'
         "</details>"
     )
-    payload: dict | None,
-    schema_version: str | None,
+
+
+def _render_auditor_payload(
+    payload: Optional[dict],
+    schema_version: Optional[str],
     finding: Finding,
 ) -> str:
     """Dispatch to the correct payload renderer based on ``schema_version``.
 
     - ``schema_version`` starting with ``"currency/"`` → ``_render_currency_payload()``
     - ``schema_version`` starting with ``"automation/"`` → ``_render_automation_payload()``
-    - ``None`` payload, ``None`` schema_version, or unrecognized schema_version → ``""``
-
-    All user-derived values inside the delegated renderers are escaped with ``_e()``.
+    - All other findings → ``_render_general_finding_detail()``
     """
     if schema_version and schema_version.startswith("currency/") and payload:
         return _render_currency_payload(payload, finding)
