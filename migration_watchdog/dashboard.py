@@ -669,9 +669,10 @@ def _format_description(description: str) -> str:
     - JSON escape sequences (\\n, \\u2014, etc.)
     - **Bold** markdown
     - `code` backtick spans
-    - Numbered lists (1. 2. 3.)
-    - Bullet lists (- item)
-    - Section headers (Advantages:, Disadvantages:, etc.)
+    - Numbered lists: (1) text or 1. text
+    - Bullet lists: - item or * item
+    - Section headers: Advantages:, Disadvantages:, etc.
+    - Long prose after a section header: split on "; (" or "; " into sub-bullets
     - Paragraph breaks (double newline)
     """
     import re as _re
@@ -684,11 +685,31 @@ def _format_description(description: str) -> str:
     except Exception:
         pass
 
-    # Split into lines for processing
+    def format_inline(text: str) -> str:
+        """Format inline markdown: **bold**, `code`."""
+        text = _e(text)
+        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+        text = _re.sub(r'`([^`]+)`', r'<code style="background:#f0f0f0;padding:1px 3px;border-radius:2px;">\1</code>', text)
+        return text
+
+    def split_prose_into_bullets(text: str) -> str:
+        """Split long prose with semicolons into a bullet list."""
+        # Split on "; (" (numbered sub-points like "; (1) ...") or "; " before capital/number
+        parts = _re.split(r';\s+(?=\(?\d+\)?[\s\.]|\([A-Z]|[A-Z][a-z])', text)
+        if len(parts) <= 1:
+            # Try splitting on ". " followed by capital letter for very long sentences
+            parts = _re.split(r'\.\s+(?=[A-Z(])', text)
+        if len(parts) <= 2:
+            # Not worth splitting — just return as paragraph
+            return f'<p style="margin:6px 0;">{format_inline(text)}</p>'
+        items = ''.join(f'<li style="margin:4px 0;">{format_inline(p.strip().rstrip(";."))}</li>' for p in parts if p.strip())
+        return f'<ul style="margin:4px 0; padding-left:20px;">{items}</ul>'
+
     lines = description.split('\n')
     html_parts: list[str] = []
     in_list = False
-    list_type = None  # 'ul' or 'ol'
+    list_type = None
+    current_section_is_prose = False
 
     def close_list():
         nonlocal in_list, list_type
@@ -697,29 +718,33 @@ def _format_description(description: str) -> str:
             in_list = False
             list_type = None
 
-    def format_inline(text: str) -> str:
-        """Format inline markdown: **bold**, `code`."""
-        text = _e(text)
-        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
-        text = _re.sub(r'`([^`]+)`', r'<code style="background:#f0f0f0;padding:1px 3px;border-radius:2px;">\1</code>', text)
-        return text
-
     for line in lines:
         stripped = line.strip()
         if not stripped:
             close_list()
+            current_section_is_prose = False
             continue
 
-        # Section headers like "Advantages:", "Disadvantages:", "Proposed structure:"
-        header_match = _re.match(r'^(Advantages|Disadvantages|Proposed structure|Summary|Background|Impact|Solution|Recommendation)s?:\s*(.*)$', stripped, _re.IGNORECASE)
+        # Section headers: "Advantages:", "Disadvantages:", "Proposed structure:", etc.
+        header_match = _re.match(
+            r'^(Advantages|Disadvantages|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note)s?:\s*(.*)$',
+            stripped, _re.IGNORECASE
+        )
         if header_match:
             close_list()
             label = header_match.group(1)
-            rest = header_match.group(2)
-            html_parts.append(f'<p style="margin:10px 0 4px 0;"><strong>{_e(label)}:</strong> {format_inline(rest)}</p>' if rest else f'<p style="margin:10px 0 4px 0;"><strong>{_e(label)}:</strong></p>')
+            rest = header_match.group(2).strip()
+            html_parts.append(
+                f'<p style="margin:12px 0 4px 0; font-weight:bold; color:#333; '
+                f'border-bottom:1px solid #e0e0e0; padding-bottom:2px;">{_e(label)}:</p>'
+            )
+            if rest:
+                # The rest after the header is prose — split into bullets
+                html_parts.append(split_prose_into_bullets(rest))
+            current_section_is_prose = True
             continue
 
-        # Numbered list items: "1. text" or "(1) text"
+        # Numbered list items: "(1) text" or "1. text"
         num_match = _re.match(r'^[\(\[]?(\d+)[\)\]\.]\s+(.+)$', stripped)
         if num_match:
             if not in_list or list_type != 'ol':
@@ -727,7 +752,8 @@ def _format_description(description: str) -> str:
                 html_parts.append('<ol style="margin:4px 0; padding-left:20px;">')
                 in_list = True
                 list_type = 'ol'
-            html_parts.append(f'<li style="margin:3px 0;">{format_inline(num_match.group(2))}</li>')
+            html_parts.append(f'<li style="margin:4px 0;">{format_inline(num_match.group(2))}</li>')
+            current_section_is_prose = False
             continue
 
         # Bullet list items: "- text" or "* text"
@@ -738,12 +764,17 @@ def _format_description(description: str) -> str:
                 html_parts.append('<ul style="margin:4px 0; padding-left:20px;">')
                 in_list = True
                 list_type = 'ul'
-            html_parts.append(f'<li style="margin:3px 0;">{format_inline(bullet_match.group(1))}</li>')
+            html_parts.append(f'<li style="margin:4px 0;">{format_inline(bullet_match.group(1))}</li>')
+            current_section_is_prose = False
             continue
 
-        # Regular paragraph text
+        # Long prose line — if it's long and has semicolons, split into bullets
         close_list()
-        html_parts.append(f'<p style="margin:6px 0;">{format_inline(stripped)}</p>')
+        if len(stripped) > 200 and '; ' in stripped:
+            html_parts.append(split_prose_into_bullets(stripped))
+        else:
+            html_parts.append(f'<p style="margin:6px 0;">{format_inline(stripped)}</p>')
+        current_section_is_prose = False
 
     close_list()
     return '\n'.join(html_parts)

@@ -15,8 +15,28 @@ from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
 
 from migration_watchdog.models import AuthoritativeData, Finding, ReviewResult, RiskLevel
+from migration_watchdog.source_fetcher import AwsDocsSearcher
 
 logger = logging.getLogger(__name__)
+
+# Module-level docs searcher for the review agent
+_review_docs_searcher = AwsDocsSearcher()
+
+
+@tool
+def search_aws_docs_for_review(query: str) -> str:
+    """Search AWS documentation to verify a finding's claims.
+
+    Use this when the pre-fetched authoritative data is insufficient to
+    confirm or deny a finding. Search for the specific claim being made.
+
+    Args:
+        query: Specific search query, e.g. "AWS App Runner closed new customers 2026"
+
+    Returns:
+        Relevant text from AWS documentation.
+    """
+    return _review_docs_searcher.search_and_fetch(query)
 
 # ---------------------------------------------------------------------------
 # Strands @tool functions
@@ -161,33 +181,38 @@ REVIEW_SYSTEM_PROMPT = (
     "For each finding you review:\n"
     "1. Use verify_finding_accuracy to cross-reference the finding against "
     "authoritative data\n"
-    "2. VERIFY that the finding includes at least one source_url. If no source "
+    "2. If the pre-fetched data is insufficient, use search_aws_docs_for_review "
+    "to look up the specific claim in AWS documentation\n"
+    "3. VERIFY that the finding includes at least one source_url. If no source "
     'is cited, mark the finding as "disputed" with the reason "no source '
     'citation provided"\n'
-    "3. Classify your assessment as one of:\n"
+    "4. Classify your assessment as one of:\n"
     '   - "confirmed": The finding is accurate, well-supported by cited '
     "authoritative data\n"
     '   - "corrected": The finding has merit but contains inaccuracies — use '
     "correct_finding to fix them\n"
-    '   - "disputed": You disagree with the finding entirely — explain your '
-    "reasoning clearly\n"
-    "4. Be skeptical — look for hallucinated claims, incorrect pricing numbers, "
+    '   - "disputed": You have POSITIVE EVIDENCE that the finding is wrong — '
+    "you checked and the claim is incorrect\n"
+    "5. Be skeptical — look for hallucinated claims, incorrect pricing numbers, "
     "wrong model names, or guidance that doesn't match the authoritative source\n"
-    "5. For disputed findings, provide detailed reasoning so the human reviewer "
-    "can make an informed decision\n"
-    "6. Check that claims are grounded in the cited sources, not in the primary "
-    "model's training data\n\n"
+    "6. For disputed findings, provide detailed reasoning so the human reviewer "
+    "can make an informed decision\n\n"
+    "CRITICAL RULE — DISPUTED vs CONFIRMED:\n"
+    "- 'disputed' means you have CHECKED and found the finding to be WRONG.\n"
+    "- If you cannot verify due to missing data, malformed JSON, insufficient "
+    "authoritative sources, or any technical error — return 'confirmed' and note "
+    "the limitation in reviewer_notes. Do NOT return 'disputed' just because "
+    "you couldn't validate.\n"
+    "- If the authoritative data payload has JSON errors or is malformed, "
+    "use search_aws_docs_for_review to look up the claim directly instead.\n"
+    "- Only dispute when you have positive evidence the finding is factually wrong.\n\n"
     "SELF-AWARE FILE CHECK (model_deprecation and staleness findings):\n"
     "Before confirming any model_deprecation or staleness finding, check whether "
     "the finding is about a file that contains 'recompute on each run' or similar "
     "self-refresh instructions. If the file already correctly marks a model as "
     "'excluded' or 'legacy' with the right EOL date, the finding is a false "
     "positive — mark it as 'disputed' with the reason: 'File already correctly "
-    "handles this via its recompute-on-run instructions. The status label is "
-    "accurate; only the header date is cosmetically stale.'\n"
-    "Only confirm model_deprecation findings where the STATUS LABEL itself is "
-    "wrong (e.g., a model past EOL is still marked 'active' or 'legacy' instead "
-    "of 'excluded' or 'eol').\n\n"
+    "handles this via its recompute-on-run instructions.'\n\n"
     "You are a different model (Nova 2 Lite) from the primary agent (Claude "
     "Opus 4.7), providing an independent perspective. Focus on factual accuracy "
     "and source grounding, not style.\n\n"
@@ -224,7 +249,7 @@ def create_review_agent() -> Agent:
     return Agent(
         model=model,
         system_prompt=REVIEW_SYSTEM_PROMPT,
-        tools=[verify_finding_accuracy, correct_finding],
+        tools=[verify_finding_accuracy, correct_finding, search_aws_docs_for_review],
     )
 
 
