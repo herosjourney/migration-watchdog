@@ -938,11 +938,65 @@ class ClaimVerifier:
         claim: "Claim",
         authoritative_data: Any,
     ) -> VerificationResult:
-        """Exact match against Bedrock lifecycle after alias resolution."""
-        # The claim_text has already been alias-resolved by ClaimExtractor.
-        # Check against bedrock_lifecycle models.
+        """Exact match against Bedrock lifecycle after alias resolution.
+
+        When alias_found is False (human-readable name not in alias table),
+        searches AWS docs live to find the canonical model ID rather than
+        failing with a false correctness finding.
+        """
         canonical_id = claim.claim_text
         lifecycle = getattr(authoritative_data, "bedrock_lifecycle", None)
+
+        # If alias resolution failed, try live docs search to find the canonical ID
+        if claim.alias_found is False:
+            search_result = _docs_searcher.search_and_fetch(
+                f"Amazon Bedrock model ID {claim.claim_text} canonical identifier"
+            )
+            if search_result:
+                # Try to extract a canonical model ID from the search result
+                import re as _re
+                id_pattern = _re.compile(
+                    r'\b(anthropic|amazon|meta|cohere|ai21|stability|mistral|us\.anthropic|us\.amazon|us\.meta)'
+                    r'\.[a-z0-9\-\.]+(?:v\d+(?::\d+)?)?',
+                    _re.IGNORECASE
+                )
+                matches = id_pattern.findall(search_result)
+                if matches:
+                    # Use the first plausible match
+                    canonical_id = matches[0]
+                    # Update the alias table in memory for this run
+                    _docs_searcher._search_cache[f"alias:{claim.claim_text}"] = canonical_id
+                else:
+                    # Docs search found content but no canonical ID — unverified
+                    return VerificationResult(
+                        claim_id=claim.claim_id,
+                        status="unverified",
+                        severity=None,
+                        actual_value=None,
+                        verification_source=None,
+                        suggested_fix=(
+                            f"Model name '{claim.claim_text}' could not be resolved to a canonical "
+                            f"Bedrock model ID. Add this mapping to alias_table.json."
+                        ),
+                        price_verification_path=None,
+                        price_metadata=None,
+                    )
+            else:
+                # No docs search result — unverified, not a correctness finding
+                return VerificationResult(
+                    claim_id=claim.claim_id,
+                    status="unverified",
+                    severity=None,
+                    actual_value=None,
+                    verification_source=None,
+                    suggested_fix=(
+                        f"Model name '{claim.claim_text}' could not be resolved to a canonical "
+                        f"Bedrock model ID. Add this mapping to alias_table.json."
+                    ),
+                    price_verification_path=None,
+                    price_metadata=None,
+                )
+
         if lifecycle is None or not lifecycle.models:
             return VerificationResult(
                 claim_id=claim.claim_id,
@@ -968,8 +1022,19 @@ class ClaimVerifier:
                 price_metadata=None,
             )
 
-        # Find closest match for suggested fix
+        # Canonical ID not in lifecycle — find closest same-family match
         suggested = self._find_closest_model(canonical_id, lifecycle.models)
+        canonical_lower = canonical_id.lower()
+        if suggested:
+            sug_lower = suggested.lower()
+            common = any(
+                part in sug_lower
+                for part in canonical_lower.split(".")[:2]
+                if len(part) > 3
+            )
+            if not common:
+                suggested = None
+
         return VerificationResult(
             claim_id=claim.claim_id,
             status="finding",
