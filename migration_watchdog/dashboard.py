@@ -747,6 +747,9 @@ def _format_description(description: str) -> str:
 
     close_list()
     return '\n'.join(html_parts)
+
+
+def _render_general_finding_detail(finding: Finding) -> str:
     """Render a ``<details>`` panel for non-currency/automation findings."""
     parts: list[str] = []
 
