@@ -474,19 +474,25 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
     primary_reasoning = finding.primary_reasoning
 
     if review_status == "disputed":
+        dispute_reason = review_notes or primary_reasoning or "No reason provided."
+        try:
+            import json as _json_d
+            if '\\n' in dispute_reason or '\\u' in dispute_reason:
+                dispute_reason = _json_d.loads(f'"{dispute_reason}"')
+        except Exception:
+            pass
         parts.append(
-            '<p style="background:#ffebee; border-left:4px solid #c62828; '
-            'padding:8px 12px; color:#c62828; font-weight:bold;">'
-            "⛔ Disputed by review agent — reconcile before approving"
-            "</p>"
+            '<div style="background:#ffebee; border-left:4px solid #c62828; '
+            'padding:10px 14px; margin:8px 0; border-radius:4px;">'
+            '<strong style="color:#c62828;">⛔ Disputed by review agent</strong><br>'
+            f'<span style="color:#555; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
+            '</div>'
         )
-        if primary_reasoning:
+        if primary_reasoning and review_notes and primary_reasoning != review_notes:
             parts.append(
-                f"<p><strong>Primary reasoning:</strong> {_e(primary_reasoning)}</p>"
-            )
-        if review_notes:
-            parts.append(
-                f"<p><strong>Review notes:</strong> {_e(review_notes)}</p>"
+                '<details><summary style="cursor:pointer; color:#555;">Primary agent reasoning</summary>'
+                f'<p style="font-size:0.9em; white-space:pre-wrap;">{_e(primary_reasoning)}</p>'
+                '</details>'
             )
     elif review_status == "corrected":
         parts.append(
@@ -657,31 +663,58 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
 
 
 def _render_general_finding_detail(finding: Finding) -> str:
-    """Render a ``<details>`` panel for non-currency/automation findings.
-
-    Shows description, why it matters (impact), proposed changes, source URLs,
-    and review provenance. Used for analysis, refactoring, new_content, and
-    guidance_update findings that don't have a structured auditor_payload.
-    """
+    """Render a ``<details>`` panel for non-currency/automation findings."""
     parts: list[str] = []
 
     # --- Description (the main content) ---
     description = finding.description
     if description:
-        # Format markdown-style bold (**text**) as HTML bold
         import re as _re
+        import json as _json
+        # Decode JSON escape sequences (\n, \u2014, etc.) if present
+        try:
+            if '\\n' in description or '\\u' in description:
+                description = _json.loads(f'"{description}"')
+        except Exception:
+            pass
         desc_html = _e(description)
+        # Format **bold** markdown
         desc_html = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', desc_html)
-        desc_html = desc_html.replace('\n\n', '</p><p>').replace('\n', '<br>')
-        parts.append(f'<div style="margin-bottom:8px;"><p>{desc_html}</p></div>')
+        # Convert newlines to paragraphs
+        paragraphs = [p.strip() for p in desc_html.split('\n\n') if p.strip()]
+        formatted = ''.join(f'<p>{p.replace(chr(10), "<br>")}</p>' for p in paragraphs)
+        parts.append(f'<div style="margin-bottom:8px;">{formatted}</div>')
+
+    # --- Dispute reason (shown prominently when disputed) ---
+    review_status = finding.review_status
+    review_notes = finding.review_notes
+    primary_reasoning = finding.primary_reasoning
+
+    if review_status == "disputed":
+        dispute_reason = review_notes or primary_reasoning or "No reason provided."
+        # Decode escape sequences in dispute reason too
+        try:
+            import json as _json2
+            if '\\n' in dispute_reason or '\\u' in dispute_reason:
+                dispute_reason = _json2.loads(f'"{dispute_reason}"')
+        except Exception:
+            pass
+        parts.append(
+            '<div style="background:#ffebee; border-left:4px solid #c62828; '
+            'padding:10px 14px; margin:8px 0; border-radius:4px;">'
+            '<strong style="color:#c62828;">⛔ Disputed by review agent</strong><br>'
+            f'<span style="color:#555; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
+            '</div>'
+        )
+        if primary_reasoning and review_notes and primary_reasoning != review_notes:
+            parts.append(
+                '<details><summary style="cursor:pointer; color:#555;">Primary agent reasoning</summary>'
+                f'<p style="font-size:0.9em; white-space:pre-wrap;">{_e(primary_reasoning)}</p>'
+                '</details>'
+            )
 
     # --- Impact of leaving unresolved ---
     category = finding.category or ""
-    risk_val = (
-        finding.risk_level.value
-        if isinstance(finding.risk_level, RiskLevel)
-        else str(finding.risk_level)
-    )
     impact_map = {
         "refactoring": "Without this change, the plugin's reference directory will continue to accumulate overlapping files with no clear taxonomy, making it harder to maintain and increasing the risk of contradictory guidance.",
         "new_content": "Without this content, users migrating this workload type will receive incomplete guidance and may miss important AWS services or patterns.",
@@ -693,18 +726,38 @@ def _render_general_finding_detail(finding: Finding) -> str:
     impact = impact_map.get(category, "")
     if impact:
         parts.append(
-            f'<div style="background:#fff8e1; border-left:3px solid #f9a825; padding:6px 10px; margin:6px 0;">'
+            '<div style="background:#fff8e1; border-left:3px solid #f9a825; padding:6px 10px; margin:6px 0; border-radius:3px;">'
             f'<strong>⚠️ Impact if unresolved:</strong> {impact}'
-            f'</div>'
+            '</div>'
         )
 
     # --- Proposed changes ---
     proposed_changes = finding.proposed_changes
     if proposed_changes and isinstance(proposed_changes, dict):
-        parts.append('<p><strong>Proposed changes:</strong></p><ul>')
+        parts.append('<p><strong>Proposed changes:</strong></p>')
         for file_path, change in proposed_changes.items():
-            parts.append(f'<li><code>{_e(file_path)}</code>: {_e(str(change)[:300])}</li>')
-        parts.append('</ul>')
+            change_str = str(change)
+            # Decode escape sequences
+            try:
+                import json as _json_c
+                if '\\n' in change_str or '\\u' in change_str:
+                    change_str = _json_c.loads(f'"{change_str}"')
+            except Exception:
+                pass
+            short = change_str[:300]
+            rest = change_str[300:]
+            change_html = _e(short)
+            if rest:
+                change_html += (
+                    f'<span id="more-{hash(file_path)}" style="display:none;">{_e(rest)}</span>'
+                    f' <a href="#" onclick="document.getElementById(\'more-{hash(file_path)}\').style.display=\'inline\';this.style.display=\'none\';return false;" style="font-size:0.85em;">[show more]</a>'
+                )
+            parts.append(
+                f'<div style="margin:6px 0; padding:8px 10px; background:#f5f5f5; border-radius:4px; border-left:3px solid #1565c0;">'
+                f'<div style="margin-bottom:4px;">{change_html}</div>'
+                f'<div style="font-size:0.8em; color:#666; font-family:monospace;">{_e(file_path)}</div>'
+                f'</div>'
+            )
 
     # --- Source URLs ---
     source_urls = finding.source_urls
@@ -714,20 +767,9 @@ def _render_general_finding_detail(finding: Finding) -> str:
             parts.append(f'<li><a href="{_e(url)}" target="_blank">{_e(url)}</a></li>')
         parts.append('</ul>')
 
-    # --- Review provenance ---
-    review_status = finding.review_status
-    review_notes = finding.review_notes
-    if review_status == "disputed":
-        parts.append(
-            '<p style="background:#ffebee; border-left:4px solid #c62828; '
-            'padding:8px 12px; color:#c62828; font-weight:bold;">'
-            "⛔ Disputed by review agent — reconcile before approving"
-            "</p>"
-        )
-        if review_notes:
-            parts.append(f"<p><strong>Review notes:</strong> {_e(review_notes)}</p>")
-    elif review_status == "corrected" and review_notes:
-        parts.append(f'<p><strong>Review notes:</strong> {_e(review_notes)}</p>')
+    # --- Corrected notes ---
+    if review_status == "corrected" and review_notes:
+        parts.append(f'<p><strong>Review correction notes:</strong> {_e(review_notes)}</p>')
 
     if not parts:
         return ""
