@@ -154,6 +154,13 @@ def compare_models(repo_model_md: str, provider: str, current_models_json: str) 
     return json.dumps(
         {
             "provider": provider,
+            # Models in the current provider catalog that are MISSING from the repo mapping table
+            # — these should be flagged as new_content findings
+            "models_missing_from_repo": sorted(added),
+            # Models in the repo mapping table that no longer exist in the current catalog
+            # — these should be flagged as model_deprecation findings
+            "models_removed_from_catalog": sorted(removed),
+            # Keep legacy field names for backward compatibility
             "added_models": sorted(added),
             "removed_models": sorted(removed),
             "lifecycle_changes": [
@@ -635,7 +642,16 @@ You will be given:
 
 Your tasks:
 - Compare pricing-cache.md against current AWS/provider pricing using the compare_pricing tool
-- Compare AI model mapping guides against current model data using the compare_models tool
+- Compare AI model mapping guides against current model data using the compare_models tool.
+  **CRITICAL: When compare_models returns `models_missing_from_repo`, you MUST create a
+  `new_content` finding for each missing model. Do NOT skip this step.** A model that exists
+  in the current Gemini/OpenAI catalog but is absent from the plugin's mapping table means
+  users running that model will get incorrect migration guidance. For each missing model:
+  - Use search_aws_docs or web_search to find the model's pricing and capabilities
+  - Create a finding with category="new_content" explaining what the model is and why it
+    needs a mapping table row (pricing tier, use case, any special characteristics like
+    variable pricing for thinking models)
+  - Include the model name, current pricing, and recommended Bedrock equivalent in the description
 - Compare each design-ref file against current AWS best practices using the compare_design_ref tool
 - Check for new content opportunities (Bedrock Agents, AgentCore, Strands SDK, startup migration) \
 using the check_new_content_opportunities tool

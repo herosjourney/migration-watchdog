@@ -769,14 +769,25 @@ class SourceFetcher:
         )
 
     def _parse_gemini_models(self, text: str) -> list[dict]:
-        """Parse Gemini model names from extracted text."""
+        """Parse Gemini model names from extracted text.
+
+        Captures full variant strings including preview, thinking, and date suffixes
+        so that models like gemini-2.5-flash-thinking and gemini-2.5-flash-preview-05-20
+        are detected as distinct entries rather than collapsed into gemini-2.5-flash.
+        """
         models: list[dict] = []
         seen: set[str] = set()
-        # Look for model identifiers like "gemini-2.0-flash", "gemini-1.5-pro", etc.
-        pattern = re.compile(r"gemini[-\s][\w.\-]+", re.IGNORECASE)
+        # Match full Gemini model identifiers including variant suffixes
+        # e.g. gemini-2.5-flash-thinking, gemini-2.5-flash-preview-05-20, gemini-1.5-pro
+        pattern = re.compile(
+            r'gemini[-\s][\d]+\.[\d]+[-\s][\w][\w.\-]*',
+            re.IGNORECASE
+        )
         for match in pattern.finditer(text):
             name = match.group(0).strip().lower().replace(" ", "-")
-            if name not in seen:
+            # Normalize: remove trailing punctuation
+            name = name.rstrip(".,;:")
+            if name not in seen and len(name) > 8:  # filter out very short false matches
                 seen.add(name)
                 models.append({"name": name, "raw_text": match.group(0)})
         return models
