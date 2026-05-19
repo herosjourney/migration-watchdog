@@ -1476,14 +1476,13 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 claim_type = payload_data.get('claim_type', '')
                 # Translate claim_type to plain English
                 plain_type = _claim_type_plain.get(claim_type, claim_type.replace('_', ' ').title() if claim_type else '')
-                # Strip " in filename.md" suffix from title
-                display_title = _re_title.sub(r'\s+in\s+\S+\.md$', '', display_title)
-                # Replace "Currency drift: <raw_type>" with "Stale claim: <plain_type>"
-                display_title = _re_title.sub(r'^Currency drift:\s*\S+', f'Stale claim: {plain_type}', display_title)
-                # Append the actual claim text so user knows what's wrong
+                # Strip everything from " in filename.md" to end (handles multi-word claim types)
+                display_title = _re_title.sub(r'\s+in\s+\S+$', '', display_title)
+                # Replace "Currency drift: <anything>" with "Stale claim: <plain_type>"
+                display_title = _re_title.sub(r'^Currency drift:.*$', f'Stale claim: {plain_type}', display_title)
+                # Append the actual claim text — no truncation, let the column wrap
                 if claim_text:
-                    short_claim = claim_text[:80] + ('…' if len(claim_text) > 80 else '')
-                    display_title = f'{display_title} — "{short_claim}"'
+                    display_title = f'{display_title} — "{claim_text}"'
             elif schema and schema.startswith('automation/'):
                 import re as _re_title
                 # Strip " in path/to/file.md" suffix
