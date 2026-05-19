@@ -222,26 +222,33 @@ These are informational — they don't fail CI.
 
 ### 5. Security Auditor
 
-**Model:** Static pattern matching (no LLM)
+**Model:** Claude Opus 4.7 (`us.anthropic.claude-opus-4-7`) via Amazon Bedrock
 
-**Purpose:** Scans reference files that describe generated scripts, Terraform, and Python
-code for security anti-patterns. Flags issues in the plugin's *instructions* before they
-produce vulnerable infrastructure for users.
+**Purpose:** Reads migration plugin reference files and uses LLM reasoning to identify
+security anti-patterns in the plugin's *instructions* — issues that would cause the
+generated Terraform, shell scripts, or Python code to be insecure. Unlike static pattern
+matching, the LLM understands context and can identify novel issues not in a predefined list.
 
-**Checks performed:**
-- Open administrative ports (22/SSH, 3389/RDP, 5900/VNC) from 0.0.0.0/0 in security groups
+**Checklist (grounded in AWS Startup Security Baseline ACCT.01-ACCT.13):**
+- Open administrative ports (22/SSH, 3389/RDP, 5900/VNC) from 0.0.0.0/0
 - Secrets stored in shell variables (exposed in `ps aux`, shell history, core dumps)
 - Database passwords in Terraform variables (plaintext in state)
 - Missing `deletion_protection` on Aurora/RDS clusters
 - Secrets Manager rotation blocks without compliance gate (breaks non-compliance stacks)
-- `max_tokens` set to high values in Bedrock provider adapters (TPM quota burndown trap)
+- `max_tokens` set too high in Bedrock adapters (TPM quota burndown trap)
+- Missing security baseline resources (GuardDuty, CloudTrail, S3 Public Access Block, IAM password policy)
+- IMDSv2 not enforced on EC2 launch templates
+- Any other security anti-patterns the LLM identifies
 
-**Files scanned:** `generate-artifacts-*`, `networking.md`, `security.md`, `design-infra.md`
+**Files scanned:** `generate-artifacts-*`, `networking.md`, `security.md`, `design-infra.md`, `baseline.md`
+
+**Verification:** Uses `search_aws_security_docs` to verify current AWS security best practices
+and find authoritative source URLs before flagging issues.
 
 **Limitations:**
-- Pattern matching only — cannot reason about semantic correctness of generated code.
-- Detects anti-patterns described in markdown prose and code blocks, not just literal code.
-- Security findings never fail CI regardless of severity.
+- LLM-based — slower than static analysis (~30-60s per file)
+- May produce false positives on files with complex conditional logic
+- Security findings never fail CI regardless of severity
 
 ---
 
