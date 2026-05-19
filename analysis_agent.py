@@ -242,6 +242,13 @@ def check_new_content_opportunities(
         "agentcore": ["agentcore", "agent core"],
         "strands_sdk": ["strands sdk", "strands-agents", "strands agent"],
         "startup_migration": ["startup migration", "startup agentic"],
+        # New topics based on recent AWS releases (2025-2026)
+        "agentcore_cli": ["agentcore cli", "agentcore-cli", "agentcore get started cli"],
+        "agent_registry": ["agent registry", "aws agent registry", "agentcore registry"],
+        "google_adk": ["google adk", "google agent development kit", "adk agent", "adk runner", "google.adk"],
+        "agentcore_nodejs": ["node.js runtime", "nodejs runtime", "agentcore node", "direct code deploy node"],
+        "agentcore_harness": ["agentcore harness", "harness configuration", "design-ref-harness"],
+        "agentcore_evaluations": ["agentcore evaluations", "batch evaluation", "user simulation", "performance loop"],
     }
 
     opportunities: list[dict] = []

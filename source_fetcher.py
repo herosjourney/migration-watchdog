@@ -38,6 +38,9 @@ AWS_DOC_TOPICS: list[str] = [
     "database",
     "storage",
     "ai",
+    "agentcore_releases",
+    "agentcore_cli",
+    "agent_registry",
 ]
 
 # AWS documentation URLs by topic
@@ -46,6 +49,12 @@ AWS_DOC_URLS: dict[str, str] = {
     "database": "https://docs.aws.amazon.com/whitepapers/latest/aws-overview/database.html",
     "storage": "https://docs.aws.amazon.com/whitepapers/latest/aws-overview/storage-services.html",
     "ai": "https://docs.aws.amazon.com/whitepapers/latest/aws-overview/machine-learning.html",
+    # AgentCore release notes — monthly updates on new capabilities, regions, GA announcements
+    "agentcore_releases": "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/release-notes.html",
+    # AgentCore CLI — GA March 2026, scaffolds Strands/LangChain/Google ADK/OpenAI Agents SDK
+    "agentcore_cli": "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
+    # AWS Agent Registry — Preview April 2026, centralized agent/tool discovery
+    "agent_registry": "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html",
 }
 
 # Gemini API documentation URLs
@@ -98,6 +107,15 @@ RELEVANCE_KEYWORDS: list[str] = [
     "compute",
     "database",
     "storage",
+    # New: AgentCore CLI, Agent Registry, Google ADK, Node.js runtime
+    "agentcore cli",
+    "agent registry",
+    "google adk",
+    "node.js",
+    "nodejs",
+    "harness",
+    "performance loop",
+    "evaluations",
 ]
 
 # AWS Pricing API service codes
@@ -402,6 +420,30 @@ class AwsDocsSearcher:
             "region": (
                 "AWS Regions",
                 "https://docs.aws.amazon.com/general/latest/gr/rande.html",
+            ),
+            "agentcore cli": (
+                "Amazon Bedrock AgentCore CLI",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
+            ),
+            "agent registry": (
+                "AWS Agent Registry",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html",
+            ),
+            "agentcore release": (
+                "Amazon Bedrock AgentCore Release Notes",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/release-notes.html",
+            ),
+            "google adk": (
+                "Amazon Bedrock AgentCore CLI (Google ADK support)",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
+            ),
+            "node.js runtime": (
+                "AgentCore Runtime Node.js",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-code-deploy-node.html",
+            ),
+            "performance loop": (
+                "AgentCore Agent Performance Loop",
+                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/optimization.html",
             ),
         }
 
