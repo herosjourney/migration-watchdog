@@ -214,14 +214,8 @@ def _get_pr_creator() -> PRCreator:
 def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str:
     """Render compact inline HTML badges for the main table row.
 
-    Returns an HTML string with badges for risk level, review status, status
-    (with optional dismissed-cooldown indicator), PR link, category, short ID
-    prefix, and schema-specific badges (severity for currency, gap/confidence/
-    human-gate/automate for automation).
-
-    All user-derived values are escaped with ``_e()``.
-    The disputed banner fires ONLY when ``review_status == "disputed"`` — never
-    on ``None``.
+    Uses light colors readable on the dark glassmorphic background.
+    Replaces cryptic labels with plain English.
     """
     parts: list[str] = []
 
@@ -235,162 +229,109 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
     risk_labels = {"high": "High", "medium": "Medium", "low": "Low"}
     risk_icon = risk_icons.get(risk_val.lower(), "⚪")
     risk_label = risk_labels.get(risk_val.lower(), _e(risk_val))
-    parts.append(
-        f'<span style="font-weight:bold;">{risk_icon} {risk_label}</span>'
-    )
+    parts.append(f'<span style="font-weight:bold; color:#e0e0e0;">{risk_icon} {risk_label}</span>')
 
-    # --- Review status badge (blank when None) ---
-    review_status = finding.review_status
-    if review_status is not None:
-        badge_colors = {
-            "confirmed": "#2e7d32",
-            "corrected": "#e65100",
-            "disputed": "#c62828",
-        }
-        color = badge_colors.get(review_status, "#555")
-        parts.append(
-            f'<span style="color:{color}; font-weight:bold; border:1px solid {color}; '
-            f'padding:1px 4px; border-radius:3px;">{_e(review_status)}</span>'
-        )
-
-    # --- Status badge + optional dismissed-cooldown indicator ---
-    status_val = _e(finding.status)
-    status_html = f'<span style="padding:1px 4px; border-radius:3px; background:#eee;">{status_val}</span>'
-    if dismissal_active and finding.status == "pending":
-        status_html += (
-            ' <span style="color:#555; font-size:0.85em;">🔕 dismissed (cooldown)</span>'
-        )
+    # --- Status badge ---
+    status_val = finding.status or "pending"
+    status_colors = {
+        "pending": "rgba(255,255,255,0.3)",
+        "approved": "#a5d6a7",
+        "declined": "#ef9a9a",
+        "superseded": "rgba(255,255,255,0.2)",
+    }
+    status_color = status_colors.get(status_val, "rgba(255,255,255,0.3)")
+    status_html = f'<span style="color:{status_color}; font-size:0.82em;">{_e(status_val)}</span>'
+    if dismissal_active and status_val == "pending":
+        status_html += ' <span style="color:rgba(255,255,255,0.4); font-size:0.8em;">🔕 dismissed</span>'
     parts.append(status_html)
+
+    # --- Category badge ---
+    category = finding.category or ""
+    schema = finding.finding_schema_version or ""
+    cat_labels = {
+        "currency_drift": ("💱 currency", "#64b5f6"),
+        "automation_gap": ("🤖 automation", "#ce93d8"),
+        "security": ("🔒 security", "#ef9a9a"),
+        "refactoring": ("🏗️ refactor", "#ffcc80"),
+        "pricing": ("💰 pricing", "#80cbc4"),
+        "model_deprecation": ("⚠️ model", "#ffb74d"),
+        "new_model": ("✨ new model", "#a5d6a7"),
+        "guidance_update": ("📝 guidance", "#90caf9"),
+        "new_content": ("➕ new content", "#b39ddb"),
+    }
+    if category in cat_labels:
+        label, color = cat_labels[category]
+        parts.append(
+            f'<span style="color:{color}; font-size:0.8em; border:1px solid {color}; '
+            f'padding:1px 6px; border-radius:10px;">{label}</span>'
+        )
 
     # --- PR URL link ---
     if finding.pr_url:
         parts.append(
             f'<a href="{_e(finding.pr_url)}" target="_blank" '
-            f'style="font-size:0.85em;">[Fix PR ↗]</a>'
+            f'style="font-size:0.82em; color:#90c8ff;">[Fix PR ↗]</a>'
         )
 
-    # --- Category badge ---
-    schema = finding.finding_schema_version or ""
-    category = finding.category or ""
-    if category == "currency_drift":
-        cat_label = "currency"
-        cat_color = "#1565c0"
-    elif category == "automation_gap":
-        cat_label = "automation"
-        cat_color = "#6a1b9a"
-    else:
-        cat_label = "analysis"
-        cat_color = "#37474f"
-    parts.append(
-        f'<span style="color:{cat_color}; font-size:0.8em; border:1px solid {cat_color}; '
-        f'padding:1px 4px; border-radius:3px;">{cat_label}</span>'
-    )
-
-    # --- Short claim/action ID prefix (first 8 hex chars) ---
+    # --- Currency-specific: severity badge ---
     payload = finding.auditor_payload or {}
-    short_id = ""
-    if schema.startswith("currency/"):
-        raw_id = payload.get("claim_id") or ""
-        short_id = str(raw_id)[:8]
-    elif schema.startswith("automation/"):
-        raw_id = payload.get("action_fingerprint") or ""
-        short_id = str(raw_id)[:8]
-    if short_id:
-        parts.append(
-            f'<span style="font-family:monospace; font-size:0.8em; color:#555;">{_e(short_id)}</span>'
-        )
-
-    # --- Currency-specific badges ---
     if schema.startswith("currency/"):
         severity = payload.get("severity")
         if severity is not None:
-            sev_colors = {
-                "correctness": "#c62828",
-                "outdated": "#e65100",
-                "policy_change": "#1565c0",
+            sev_labels = {
+                "correctness": ("🔴 Wrong", "#ff5252"),
+                "outdated": ("🟡 Stale", "#ffb74d"),
+                "policy_change": ("🔵 Changed", "#64b5f6"),
+                "informational": ("ℹ️ Info", "#90a4ae"),
             }
-            sev_color = sev_colors.get(severity, "#555")
-            parts.append(
-                f'<span style="color:{sev_color}; font-size:0.8em; border:1px solid {sev_color}; '
-                f'padding:1px 4px; border-radius:3px;">{_e(severity)}</span>'
-            )
+            if severity in sev_labels:
+                label, color = sev_labels[severity]
+                parts.append(
+                    f'<span style="color:{color}; font-size:0.8em;">{label}</span>'
+                )
 
     # --- Automation-specific badges ---
     elif schema.startswith("automation/"):
-        # Gap badge
         gap_type = payload.get("gap_type")
         if gap_type is not None:
-            gap_colors = {
-                "full_gap": "#c62828",
-                "partial_gap": "#e65100",
-                "no_gap": "#2e7d32",
+            gap_labels = {
+                "full_gap": ("🔴 Not automated", "#ff5252"),
+                "partial_gap": ("🟡 Partially automated", "#ffb74d"),
+                "no_gap": ("✅ Already automated", "#a5d6a7"),
             }
-            gap_color = gap_colors.get(gap_type, "#555")
-            parts.append(
-                f'<span style="color:{gap_color}; font-size:0.8em; border:1px solid {gap_color}; '
-                f'padding:1px 4px; border-radius:3px;">{_e(gap_type)}</span>'
-            )
+            if gap_type in gap_labels:
+                label, color = gap_labels[gap_type]
+                parts.append(f'<span style="color:{color}; font-size:0.8em;">{label}</span>')
 
-        # Confidence badge
-        confidence = payload.get("confidence")
-        if confidence is not None:
-            conf_colors = {"high": "#2e7d32", "medium": "#e65100", "low": "#c62828"}
-            conf_color = conf_colors.get(confidence, "#555")
-            parts.append(
-                f'<span style="color:{conf_color}; font-size:0.8em;">conf:{_e(confidence)}</span>'
-            )
-
-        # Human gate badge
         if payload.get("human_gate") == "required":
-            parts.append(
-                '<span style="color:#6a1b9a; font-size:0.85em;">🔒 human gate</span>'
-            )
+            parts.append('<span style="color:#ce93d8; font-size:0.82em;">🔒 needs approval</span>')
 
-        # Automate badge
         automate = payload.get("automate_recommended")
-        if automate is not None:
-            icon = "✅" if automate == "yes" else "❌"
-            parts.append(
-                f'<span style="font-size:0.85em;">{icon} {_e(automate)}</span>'
-            )
+        if automate == "yes":
+            parts.append('<span style="color:#a5d6a7; font-size:0.82em;">✅ can automate</span>')
+        elif automate == "no":
+            parts.append('<span style="color:#ef9a9a; font-size:0.82em;">❌ keep manual</span>')
 
     return " ".join(parts)
 
 
 def _render_currency_payload(payload: dict, finding: Finding) -> str:
-    """Render a ``<details>`` panel for a currency/1.0 finding.
-
-    Shows claim text, claim type, severity (with colour), actual value,
-    suggested fix, verification source link, price verification path,
-    alias resolved status, price metadata, scope, and review provenance
-    from the Finding (not the payload).
-
-    All user-derived values are escaped with ``_e()``.
-    """
+    """Render a ``<details>`` panel for a currency/1.0 finding."""
     parts: list[str] = []
 
-    # --- Truncated payload warning ---
-    # Show only when the payload was NOT successfully enriched from S3.
-    # If auditor_payload_s3_key is present but the inline fields are populated
-    # (i.e. S3 fetch succeeded and the full payload replaced the truncated one),
-    # the key may still be present — don't show the warning in that case.
-    # We detect truncation by checking whether claim_text/action_text is absent
-    # (stripped during truncation) while the s3_key is present.
     s3_key = payload.get("auditor_payload_s3_key")
     is_truncated = s3_key and not payload.get("claim_text") and not payload.get("action_text")
     if is_truncated:
         parts.append(
-            '<p style="color:#e65100; font-style:italic;">'
+            '<p style="color:#ffb74d; font-style:italic;">'
             "⚠️ Showing truncated payload — full details unavailable"
             "</p>"
         )
 
-    # --- Claim text ---
     claim_text = payload.get("claim_text")
     if claim_text is not None:
-        parts.append(f"<p><strong>Claim:</strong> &ldquo;{_e(claim_text)}&rdquo;</p>")
+        parts.append(f'<p><strong>Claim:</strong> &ldquo;{_e(claim_text)}&rdquo;</p>')
 
-    # --- Claim type + optional subtype ---
     claim_type = payload.get("claim_type")
     claim_subtype = payload.get("claim_subtype")
     if claim_type is not None:
@@ -399,31 +340,27 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
             type_str += f" / {_e(claim_subtype)}"
         parts.append(f"<p><strong>Claim type:</strong> {type_str}</p>")
 
-    # --- Severity with colour ---
     severity = payload.get("severity")
     if severity is not None:
         sev_colors = {
-            "correctness": "#c62828",
-            "outdated": "#e65100",
-            "policy_change": "#1565c0",
+            "correctness": "#ff5252",
+            "outdated": "#ffb74d",
+            "policy_change": "#64b5f6",
         }
-        sev_color = sev_colors.get(severity, "#555")
+        sev_color = sev_colors.get(severity, "#aaa")
         parts.append(
             f'<p><strong>Severity:</strong> '
             f'<span style="color:{sev_color}; font-weight:bold;">{_e(severity)}</span></p>'
         )
 
-    # --- Actual value ---
     actual_value = payload.get("actual_value")
     if actual_value is not None:
         parts.append(f"<p><strong>Actual value:</strong> {_e(actual_value)}</p>")
 
-    # --- Suggested fix ---
     suggested_fix = payload.get("suggested_fix")
     if suggested_fix is not None:
-        parts.append(f"<p><strong>Suggested fix:</strong> {_e(suggested_fix)}</p>")
+        parts.append(f'<p><strong>Suggested fix:</strong> <span style="color:#a5d6a7;">{_e(suggested_fix)}</span></p>')
 
-    # --- Verification source as clickable link ---
     verification_source = payload.get("verification_source")
     if verification_source is not None:
         parts.append(
@@ -431,44 +368,10 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
             f'<a href="{_e(verification_source)}" target="_blank">{_e(verification_source)}</a></p>'
         )
 
-    # --- Price verification path (when claim_type="price") ---
-    if claim_type == "price":
-        price_path = payload.get("price_verification_path")
-        if price_path is not None:
-            parts.append(
-                f"<p><strong>Verification path:</strong> {_e(price_path)}</p>"
-            )
-
-    # --- Alias resolved (when claim_type="model_id" and alias_found is present) ---
-    if claim_type == "model_id":
-        alias_found = payload.get("alias_found")
-        if alias_found is not None:
-            if alias_found:
-                alias_str = "✅ yes"
-            else:
-                alias_str = "⚠️ no (raw value used, pending review)"
-            parts.append(f"<p><strong>Alias resolved:</strong> {alias_str}</p>")
-
-    # --- Price metadata (when claim_type="price") ---
-    if claim_type == "price":
-        price_meta = payload.get("price_metadata")
-        if price_meta and isinstance(price_meta, dict):
-            currency = _e(price_meta.get("currency", ""))
-            unit = _e(price_meta.get("unit", ""))
-            pricing_model = _e(price_meta.get("pricing_model", ""))
-            region = _e(price_meta.get("region", ""))
-            meta_parts = [p for p in [currency, unit, pricing_model, region] if p]
-            if meta_parts:
-                parts.append(
-                    f"<p><strong>Price metadata:</strong> {' · '.join(meta_parts)}</p>"
-                )
-
-    # --- Scope ---
     scope = payload.get("scope")
     if scope is not None:
         parts.append(f"<p><strong>Scope:</strong> {_e(scope)}</p>")
 
-    # --- Review provenance (from Finding, not payload) ---
     review_status = finding.review_status
     review_notes = finding.review_notes
     primary_reasoning = finding.primary_reasoning
@@ -482,42 +385,30 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
         except Exception:
             pass
         parts.append(
-            '<div style="background:#ffebee; border-left:4px solid #c62828; '
+            '<div style="background:rgba(198,40,40,0.2); border-left:4px solid #ef5350; '
             'padding:10px 14px; margin:8px 0; border-radius:4px;">'
-            '<strong style="color:#c62828;">⛔ Disputed by review agent</strong><br>'
-            f'<span style="color:#555; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
+            '<strong style="color:#ef9a9a;">⛔ Disputed by review agent</strong><br>'
+            f'<span style="color:#ffcdd2; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
             '</div>'
         )
-        if primary_reasoning and review_notes and primary_reasoning != review_notes:
-            parts.append(
-                '<details><summary style="cursor:pointer; color:#555;">Primary agent reasoning</summary>'
-                f'<p style="font-size:0.9em; white-space:pre-wrap;">{_e(primary_reasoning)}</p>'
-                '</details>'
-            )
     elif review_status == "corrected":
         parts.append(
             f'<p><strong>Review status:</strong> '
-            f'<span style="color:#e65100; font-weight:bold;">corrected</span></p>'
+            f'<span style="color:#ffb74d; font-weight:bold;">corrected</span></p>'
         )
         if review_notes:
-            parts.append(
-                f"<p><strong>Review notes:</strong> {_e(review_notes)}</p>"
-            )
+            parts.append(f"<p><strong>Review notes:</strong> {_e(review_notes)}</p>")
     elif review_status == "confirmed":
         parts.append(
             f'<p><strong>Review status:</strong> '
-            f'<span style="color:#2e7d32; font-weight:bold;">confirmed</span></p>'
+            f'<span style="color:#a5d6a7; font-weight:bold;">confirmed</span></p>'
         )
-        if review_notes:
-            parts.append(
-                f"<p><strong>Review notes:</strong> {_e(review_notes)}</p>"
-            )
 
     inner = "\n".join(parts)
     return (
         "<details>"
         "<summary>Currency Finding Details</summary>"
-        f'<div style="padding:8px 12px;">{inner}</div>'
+        f'<div style="padding:8px 12px; color:#e0e0e0;">{inner}</div>'
         "</details>"
     )
 
@@ -644,8 +535,8 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
     # --- Human gate warning ---
     if payload.get("human_gate") == "required":
         parts.append(
-            '<p style="background:#f3e5f5; border-left:4px solid #6a1b9a; '
-            'padding:8px 12px; color:#6a1b9a; font-weight:bold;">'
+            '<p style="background:rgba(106,27,154,0.2); border-left:4px solid #ce93d8; '
+            'padding:8px 12px; color:#ce93d8; font-weight:bold;">'
             "⚠️ Requires human approval before execution"
             "</p>"
         )
@@ -672,7 +563,7 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
     return (
         "<details>"
         "<summary>Automation Finding Details</summary>"
-        f'<div style="padding:8px 12px;">{inner}</div>'
+        f'<div style="padding:8px 12px; color:#e0e0e0;">{inner}</div>'
         "</details>"
     )
 
@@ -1273,6 +1164,12 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             "categories": {"refactoring"},
             "findings": [],
         },
+        "security": {
+            "label": "🔒 Security Auditor",
+            "description": "Scans reference files that describe generated code (scripts, Terraform, Python adapters) for security vulnerabilities. Flags open admin ports, secrets in shell variables, plaintext database passwords, missing deletion protection, and other security anti-patterns in generated infrastructure. These findings should be prioritized — they represent real vulnerabilities in code the plugin generates for users.",
+            "categories": {"security"},
+            "findings": [],
+        },
     }
 
     for f, finding_obj in zip(findings_data, enriched_findings):
@@ -1472,6 +1369,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             text-align: left;
             vertical-align: top;
             font-size: 0.88em;
+            color: #e0e0e0;
         }}
         th {{
             background: rgba(255,255,255,0.06);
