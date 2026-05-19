@@ -34,6 +34,9 @@ htmlcov/
 # Local plan/draft directories
 plan-*/
 
+# Nested package copy (artifact from plan directory, not real source)
+migration_watchdog/
+
 # Kiro spec files (local tooling only)
 .kiro/
 
