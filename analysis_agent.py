@@ -261,6 +261,8 @@ def check_new_content_opportunities(
         "bedrock_mantle_limits": ["mantle throughput", "10000 rpm", "10,000 rpm", "mantle limit", "bedrock-mantle limit"],
         "max_tokens_trap": ["max_tokens reservation", "tpm quota", "token reservation", "max_tokens.*bedrock"],
         "harness_regional_availability": ["harness.*preview", "harness.*region", "agentcore harness.*available"],
+        "mantle_responses_api": ["responses api", "mantle.*responses", "bedrock-mantle.*responses", "stateful.*mantle"],
+        "assistants_api_shortcut": ["assistants api.*mantle", "mantle.*assistants", "assistants.*stateful.*conversation"],
     }
 
     opportunities: list[dict] = []
@@ -695,6 +697,20 @@ generate-artifacts-ai.md, design-ref-agentic-to-agentcore.md, design-ref-harness
 4. **gpt-oss on Bedrock**: OpenAI's open-source models (gpt-oss-120b, gpt-oss-20b) are available
    natively on Bedrock. If the plugin's design phase doesn't surface gpt-oss as a migration path
    alongside Mantle/Converse/LangChain, create a new_content finding.
+
+5. **Bedrock Mantle Responses API**: The bedrock-mantle endpoint supports the Responses API with
+   stateful conversation management (server-side context, no manual history passing), async/long-running
+   inference, and streaming. If the plugin's OpenAI-to-Bedrock migration reference doesn't document
+   the Responses API capabilities and its implication — that apps using OpenAI Assistants API ONLY
+   for stateful multi-turn conversations can migrate via Mantle Responses API (same-day env var swap)
+   rather than a full Bedrock Agents migration (2-4 weeks) — create a guidance_update finding.
+   Use search_aws_docs to verify current Responses API capabilities on Mantle.
+
+6. **Assistants API → Mantle shortcut missing**: If the plugin routes ALL Assistants API usage to
+   Bedrock Agents without first checking whether the use case is purely stateful conversation
+   (which Mantle Responses API handles with zero code changes), create a guidance_update finding.
+   The distinction matters: Bedrock Agents migration takes 2-4 weeks; Mantle Responses API is a
+   same-day env var swap. Check the design-ai.md Feature Migration table for the Assistants API row.
 
 SELF-AWARE FILES — READ INTENT BEFORE FLAGGING:
 Some reference files contain explicit instructions to recompute or refresh their data on each run \

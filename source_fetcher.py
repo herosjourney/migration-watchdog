@@ -445,6 +445,14 @@ class AwsDocsSearcher:
                 "AgentCore Agent Performance Loop",
                 "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/optimization.html",
             ),
+            "responses api": (
+                "Amazon Bedrock Mantle Responses API",
+                "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
+            ),
+            "assistants api": (
+                "Amazon Bedrock Mantle Responses API (Assistants API migration)",
+                "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
+            ),
         }
 
         results: list[dict] = []
