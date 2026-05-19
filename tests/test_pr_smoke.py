@@ -52,6 +52,9 @@ _STUBS = [
     "migration_watchdog.source_fetcher",
     "migration_watchdog.currency_auditor",
     "migration_watchdog.automation_auditor",
+    "migration_watchdog.security_auditor",
+    "migration_watchdog.pr_commenter",
+    "migration_watchdog.scan_config",
 ]
 
 for _stub_name in _STUBS:
@@ -106,6 +109,59 @@ _mw_currency.currency_dedupe_key = MagicMock(side_effect=lambda f: (f.category, 
 _mw_automation = sys.modules["migration_watchdog.automation_auditor"]
 _mw_automation.run_automation_audit = AsyncMock(return_value=[])
 _mw_automation.automation_dedupe_key = MagicMock(side_effect=lambda f: (f.category, frozenset(f.affected_files), f.finding_id))
+
+# Stub security_auditor
+_mw_security = sys.modules["migration_watchdog.security_auditor"]
+_mw_security.run_security_audit = AsyncMock(return_value=[])
+_mw_security.security_dedupe_key = MagicMock(side_effect=lambda f: (f.category, frozenset(f.affected_files), f.finding_id))
+
+# Stub pr_commenter — provide the four functions main.py imports
+_mw_pr_commenter = sys.modules["migration_watchdog.pr_commenter"]
+_mw_pr_commenter._finding_severity = MagicMock(return_value="outdated")
+_mw_pr_commenter._should_include_in_pr_comment = MagicMock(return_value=True)
+_mw_pr_commenter._build_pr_comment_markdown = MagicMock(return_value="<!-- watchdog-audit-comment -->")
+_mw_pr_commenter._post_pr_comment = AsyncMock()
+
+# Stub scan_config — provide ScanConfig with from_env()
+import dataclasses as _dc
+
+@_dc.dataclass
+class _MockScanConfig:
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    github_installation_id: str = ""
+    dynamodb_table: str = "test-table"
+    aws_region: str = "us-east-1"
+    target_owner: str = "owner"
+    target_repo: str = "repo"
+    trigger_type: str = "pull_request"
+    pr_number: int | None = 42
+    pr_head_sha: str | None = "abc1234"
+    pr_html_url: str | None = "https://github.com/owner/repo/pull/42"
+    changed_files: list = _dc.field(default_factory=list)
+    github_token: str = "fake-token"
+    severity_threshold: str = "outdated"
+
+    @classmethod
+    def from_env(cls) -> "_MockScanConfig":
+        import os as _os
+        changed_str = _os.environ.get("CHANGED_FILES", "")
+        changed = [f.strip() for f in changed_str.split() if f.strip()]
+        return cls(
+            trigger_type=_os.environ.get("TRIGGER_TYPE", "scheduled"),
+            pr_number=int(_os.environ.get("PR_NUMBER", "0")) or None,
+            pr_head_sha=_os.environ.get("PR_HEAD_SHA"),
+            pr_html_url=_os.environ.get("PR_HTML_URL"),
+            changed_files=changed,
+            github_token=_os.environ.get("GITHUB_TOKEN", ""),
+            target_owner=_os.environ.get("WATCHDOG_TARGET_OWNER", "owner"),
+            target_repo=_os.environ.get("WATCHDOG_TARGET_REPO", "repo"),
+            dynamodb_table=_os.environ.get("DYNAMODB_TABLE", "test-table"),
+            aws_region=_os.environ.get("AWS_REGION", "us-east-1"),
+        )
+
+_mw_scan_config = sys.modules["migration_watchdog.scan_config"]
+_mw_scan_config.ScanConfig = _MockScanConfig
 
 import main as _main_module  # noqa: E402
 
