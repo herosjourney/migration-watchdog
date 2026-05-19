@@ -361,17 +361,20 @@ no findings.
 migration-watchdog/
 ├── migration_watchdog/          ← Python package
 │   ├── main.py                  ← Pipeline orchestrator (run_scan)
+│   ├── scan_config.py           ← ScanConfig dataclass — reads + validates all env vars at startup
 │   ├── analysis_agent.py        ← Analysis Agent (Strands + Claude Opus 4.7)
 │   ├── currency_auditor.py      ← Currency Auditor (claim extraction + verification)
 │   ├── automation_auditor.py    ← Automation Auditor (gap detection)
 │   ├── review_agent.py          ← Review Agent (Nova 2 Lite quality check)
 │   ├── refactoring_agent.py     ← Refactoring Agent (structural assessment)
+│   ├── pr_commenter.py          ← PR comment building and posting (extracted from main.py)
 │   ├── dashboard.py             ← FastAPI dashboard
 │   ├── models.py                ← Core dataclasses (Finding, ScanRun, etc.)
 │   ├── findings_repository.py   ← DynamoDB data access layer
 │   ├── finding_deduplicator.py  ← Deduplication logic
+│   ├── utils.py                 ← Shared helpers (has_active_dismissal)
 │   ├── payload_store.py         ← S3 overflow for large payloads
-│   ├── source_fetcher.py        ← AWS docs + pricing fetcher + AwsDocsSearcher
+│   ├── source_fetcher.py        ← AWS docs + pricing fetcher + AwsDocsSearcher (async)
 │   ├── repo_scanner.py          ← GitHub API file fetcher
 │   ├── pr_creator.py            ← Cross-fork PR creation
 │   ├── pricing_comparator.py    ← Price tolerance comparison
@@ -381,6 +384,7 @@ migration-watchdog/
 │   ├── cli_command_index.json   ← Bundled CLI command index
 │   ├── retry.py                 ← Exponential backoff helper
 │   └── tests/                   ← Test suite
+│       ├── test_codebase_improvements.py  ← Property-based tests (hypothesis)
 │       ├── test_currency_fixtures.py
 │       ├── test_automation_fixtures.py
 │       ├── test_main_pipeline.py
@@ -407,12 +411,14 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for full infrastructure setup. The short vers
 pip install -e .
 
 # Run tests
-pytest migration_watchdog/tests/test_currency_fixtures.py \
-       migration_watchdog/tests/test_automation_fixtures.py
-pytest migration_watchdog/tests/test_main_pipeline.py
-pytest migration_watchdog/tests/test_pr_smoke.py
+pytest tests/test_codebase_improvements.py
+pytest tests/test_currency_fixtures.py tests/test_automation_fixtures.py
+pytest tests/test_main_pipeline.py
+pytest tests/test_pr_smoke.py
 
 # Required environment variables for a real run
+export WATCHDOG_TARGET_OWNER=aws-samples   # required — no default
+export WATCHDOG_TARGET_REPO=sample-agent-skills-for-aws-migration  # required — no default
 export GITHUB_APP_ID=...
 export GITHUB_APP_PRIVATE_KEY=...
 export GITHUB_INSTALLATION_ID=...
@@ -434,11 +440,12 @@ python -m migration_watchdog.main
 
 | Name | Default | Description |
 |------|---------|-------------|
-| `WATCHDOG_TARGET_OWNER` | `awslabs` | Target repo owner |
-| `WATCHDOG_TARGET_REPO` | `startups` | Target repo name |
+| `WATCHDOG_TARGET_OWNER` | — | **Required.** Target repo owner (e.g. `awslabs`) |
+| `WATCHDOG_TARGET_REPO` | — | **Required.** Target repo name (e.g. `startups`) |
 | `DYNAMODB_TABLE` | `watchdog-findings` | DynamoDB table name |
 | `WATCHDOG_PAYLOAD_BUCKET` | — | S3 bucket for oversized payloads |
 | `AWS_REGION` | `us-east-1` | AWS region |
+| `SEVERITY_THRESHOLD` | `outdated` | PR comment filter: `outdated` or `low` |
 
 **Required secrets in the content repo (`herosjourney/startups`):**
 
