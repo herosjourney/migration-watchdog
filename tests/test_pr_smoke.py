@@ -249,11 +249,10 @@ class TestPRModeSmoke:
                 # Mock boto3.resource for DynamoDB
                 mock_boto3.resource = MagicMock()
 
-                # SourceFetcher is already stubbed at module level via sys.modules.
-                # Ensure the stub instance has an awaitable fetch_all_sources.
+                # Pass the mock fetcher directly via the _source_fetcher parameter
+                # to bypass all SourceFetcher import/patching complexity.
                 _mock_fetcher.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
-
-                asyncio.run(_main_module.run_scan())
+                asyncio.run(_main_module.run_scan(_source_fetcher=_mock_fetcher))
 
         except SystemExit as exc:
             # run_scan calls sys.exit(1) on failure — treat as test failure

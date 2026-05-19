@@ -103,8 +103,12 @@ def _load_artifact_scripts(
                             break
 
 
-async def run_scan() -> None:
-    """Execute the full weekly scan pipeline."""
+async def run_scan(_source_fetcher=None) -> None:
+    """Execute the full weekly scan pipeline.
+    
+    Args:
+        _source_fetcher: Optional pre-built SourceFetcher instance (used in tests).
+    """
     run_id = str(uuid4())
     start_timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -247,7 +251,7 @@ async def run_scan() -> None:
 
         # 3. Fetch authoritative sources
         logger.info("Fetching authoritative sources …")
-        fetcher = SourceFetcher()
+        fetcher = _source_fetcher if _source_fetcher is not None else SourceFetcher()
         authoritative_data = await fetcher.fetch_all_sources()
         if authoritative_data.partial_failures:
             logger.warning(
