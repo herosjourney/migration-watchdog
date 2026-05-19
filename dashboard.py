@@ -758,7 +758,7 @@ def _format_description(description: str) -> str:
 
         # Section headers: "Advantages:", "Disadvantages:", "Proposed structure:", etc.
         header_match = _re.match(
-            r'^(Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note|Considerations|Tradeoffs)s?:\s*(.*)$',
+            r'^\*{0,2}(Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note|Considerations|Tradeoffs)s?\*{0,2}:\s*(.*)$',
             stripped, _re.IGNORECASE
         )
         if header_match:
@@ -855,8 +855,9 @@ def _render_general_finding_detail(finding: Finding) -> str:
 
         # Split the description at the first section header (Advantages:, Disadvantages:, etc.)
         # Everything before it is the "What's being proposed" intro
+        # Handles both plain "Advantages:" and bold "**Advantages:**" markdown
         section_split = _re_desc.split(
-            r'(?=(?:Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Considerations|Tradeoffs)s?:)',
+            r'(?=\*{0,2}(?:Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Considerations|Tradeoffs)s?\*{0,2}:)',
             description, maxsplit=1
         )
         intro = section_split[0].strip()
