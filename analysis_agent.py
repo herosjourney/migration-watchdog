@@ -249,6 +249,11 @@ def check_new_content_opportunities(
         "agentcore_nodejs": ["node.js runtime", "nodejs runtime", "agentcore node", "direct code deploy node"],
         "agentcore_harness": ["agentcore harness", "harness configuration", "design-ref-harness"],
         "agentcore_evaluations": ["agentcore evaluations", "batch evaluation", "user simulation", "performance loop"],
+        # AI migration specific gaps
+        "gpt_oss_bedrock": ["gpt-oss", "gpt-oss-120b", "gpt-oss-20b", "openai open-source bedrock"],
+        "bedrock_mantle_limits": ["mantle throughput", "10000 rpm", "10,000 rpm", "mantle limit", "bedrock-mantle limit"],
+        "max_tokens_trap": ["max_tokens reservation", "tpm quota", "token reservation", "max_tokens.*bedrock"],
+        "harness_regional_availability": ["harness.*preview", "harness.*region", "agentcore harness.*available"],
     }
 
     opportunities: list[dict] = []
@@ -651,6 +656,29 @@ For each service mentioned in the plugin's reference files, call check_service_o
 2. Check if newer/better AWS alternatives exist for the same use case
 3. Identify if AWS has released updated best practices that supersede current guidance
 4. Flag if a recommended service has been deprecated, closed, or superseded
+
+BEDROCK-SPECIFIC CHECKS (MANDATORY for any file mentioning Bedrock or AI migration):
+When scanning AI migration reference files (clarify-ai.md, design-ai.md, ai-migration-guardrails.md,
+generate-artifacts-ai.md, design-ref-agentic-to-agentcore.md, design-ref-harness.md):
+
+1. **Bedrock Mantle throughput limit**: The bedrock-mantle endpoint has a hard limit of 10,000 RPM
+   per account per region, shared across ALL models. If the plugin recommends Mantle as a migration
+   path without surfacing this constraint, create a guidance_update finding. Use search_aws_docs to
+   verify the current limit. Source: AWS Bedrock scaling and throughput best practices.
+
+2. **max_tokens reservation trap**: Bedrock deducts max_tokens from TPM quota at REQUEST START,
+   before any tokens are generated. Teams migrating from OpenAI with max_tokens=4096 defaults
+   reduce Bedrock concurrency by 5-8x unnecessarily. If the plugin's generated provider adapter
+   doesn't default max_tokens to ~1024 with a tuning comment, create a guidance_update finding.
+
+3. **AgentCore Harness regional availability**: AgentCore Harness is in public preview and available
+   in only 4 regions (us-east-1, us-west-2, eu-central-1, ap-southeast-2). If the plugin presents
+   Harness as a migration option without surfacing the preview status and region list, create a
+   guidance_update finding. Use search_aws_docs to verify current region availability.
+
+4. **gpt-oss on Bedrock**: OpenAI's open-source models (gpt-oss-120b, gpt-oss-20b) are available
+   natively on Bedrock. If the plugin's design phase doesn't surface gpt-oss as a migration path
+   alongside Mantle/Converse/LangChain, create a new_content finding.
 
 SELF-AWARE FILES — READ INTENT BEFORE FLAGGING:
 Some reference files contain explicit instructions to recompute or refresh their data on each run \

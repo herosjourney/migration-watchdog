@@ -1641,11 +1641,24 @@ _MIGRATION_CONTEXT_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"target(?:_system)?\s*:\s*AWS", re.IGNORECASE), "GCP", "AWS"),
     # "migrating from GCP to AWS"
     (re.compile(r"migrat\w*\s+from\s+GCP\s+to\s+AWS", re.IGNORECASE), "GCP", "AWS"),
+    # AI migration files: "OpenAI to AWS", "Gemini to Bedrock", "AI migration"
+    (re.compile(r"openai.*(?:to|aws|bedrock)|gemini.*(?:to|aws|bedrock)|ai.*migrat", re.IGNORECASE), "OpenAI/Gemini", "AWS"),
+    # Bedrock/AgentCore guidance files
+    (re.compile(r"bedrock|agentcore|strands.*agent|agent.*strands", re.IGNORECASE), "GCP", "AWS"),
 ]
 
 _PATH_CONTEXT_PATTERNS: list[tuple[str, str, str]] = [
     ("gcp-to-aws/", "GCP", "AWS"),
     ("gcp_to_aws/", "GCP", "AWS"),
+    # AI migration phase files — always in migration context
+    ("clarify-ai", "GCP", "AWS"),
+    ("design-ai", "GCP", "AWS"),
+    ("generate-artifacts-ai", "GCP", "AWS"),
+    ("ai-migration-guardrails", "GCP", "AWS"),
+    ("ai-gemini-to-bedrock", "Gemini", "AWS"),
+    ("ai-openai-to-bedrock", "OpenAI", "AWS"),
+    ("design-ref-agentic", "GCP", "AWS"),
+    ("design-ref-harness", "GCP", "AWS"),
 ]
 
 
