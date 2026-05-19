@@ -263,6 +263,7 @@ def check_new_content_opportunities(
         "harness_regional_availability": ["harness.*preview", "harness.*region", "agentcore harness.*available"],
         "mantle_responses_api": ["responses api", "mantle.*responses", "bedrock-mantle.*responses", "stateful.*mantle"],
         "assistants_api_shortcut": ["assistants api.*mantle", "mantle.*assistants", "assistants.*stateful.*conversation"],
+        "retarget_gotchas": ["retarget-gotchas", "tool calling.*bedrock", "langchain.*bedrock.*issue", "langgraph.*checkpoint.*bedrock", "crewai.*bedrock", "autogen.*bedrock"],
     }
 
     opportunities: list[dict] = []
@@ -711,6 +712,36 @@ generate-artifacts-ai.md, design-ref-agentic-to-agentcore.md, design-ref-harness
    (which Mantle Responses API handles with zero code changes), create a guidance_update finding.
    The distinction matters: Bedrock Agents migration takes 2-4 weeks; Mantle Responses API is a
    same-day env var swap. Check the design-ai.md Feature Migration table for the Assistants API row.
+
+FRAMEWORK RETARGET COMPATIBILITY CHECKS (MANDATORY for files mentioning retarget path):
+When scanning files related to the retarget migration path (design-ai.md, retarget-gotchas.md,
+or any file mentioning LangChain, LangGraph, CrewAI, AutoGen, or OpenAI SDK retarget):
+
+For each framework in the retarget path, use web_search to find known compatibility issues
+when swapping the model layer to Bedrock. Search for queries like:
+- "LangChain ChatBedrock tool calling issues"
+- "LangGraph checkpoint Bedrock compatibility"
+- "CrewAI Bedrock model hierarchical process"
+- "AutoGen Bedrock GroupChat speaker selection"
+
+If the plugin's retarget documentation (retarget-gotchas.md or equivalent) does NOT cover
+these known gotchas, create new_content findings for each gap:
+
+1. **Tool calling schema differences**: OpenAI and Claude have different tool calling formats
+   (parallel calls, argument format). If not documented, create a new_content finding.
+2. **Structured output behavior**: with_structured_output behaves differently on Claude
+   (may return partial objects). If not documented, create a new_content finding.
+3. **LangGraph checkpoint incompatibility**: LangGraph checkpoints cannot be resumed across
+   providers due to serialized message format differences. If not documented, create a finding.
+4. **Framework-specific model degradation**: CrewAI hierarchical process and AutoGen GroupChat
+   speaker selection degrade with smaller/non-Claude Bedrock models. If not documented, create a finding.
+5. **Async thread-wrapping**: Bedrock's async is thread-wrapped, not native — causes thread pool
+   exhaustion under load. If not documented, create a new_content finding.
+6. **Token counting**: tiktoken gives wrong counts for non-OpenAI models. If not documented, create a finding.
+7. **Error handling**: Code built for OpenAI HTTP errors doesn't catch AWS SDK exceptions. If not documented, create a finding.
+
+Use web_search to verify which of these are still current issues before creating findings.
+Only create findings for gaps that are NOT already covered in the plugin's retarget documentation.
 
 SELF-AWARE FILES — READ INTENT BEFORE FLAGGING:
 Some reference files contain explicit instructions to recompute or refresh their data on each run \
