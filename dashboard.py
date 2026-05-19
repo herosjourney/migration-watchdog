@@ -826,8 +826,8 @@ def _render_general_finding_detail(finding: Finding) -> str:
     impact = impact_map.get(category, "")
     if impact:
         parts.append(
-            '<div style="background:#fff8e1; border-left:3px solid #f9a825; padding:6px 10px; margin:6px 0; border-radius:3px;">'
-            f'<strong>⚠️ Impact if unresolved:</strong> {impact}'
+            '<div style="background:rgba(249,168,37,0.12); border-left:3px solid #f9a825; padding:8px 12px; margin:6px 0; border-radius:3px;">'
+            f'<strong style="color:#ffb74d;">⚠️ Impact if unresolved:</strong> <span style="color:rgba(255,255,255,0.75);">{impact}</span>'
             '</div>'
         )
 

@@ -1291,6 +1291,7 @@ class ClaimVerifier:
             prompt = f"""Verify this claim against the AWS documentation excerpt below.
 
 CLAIM: {claim.claim_text}
+CLAIM TYPE: {claim.claim_type}{f" ({claim.claim_subtype})" if claim.claim_subtype else ""}
 QUESTION: {claim.verification_query}
 
 DOCUMENTATION:
@@ -1299,7 +1300,17 @@ DOCUMENTATION:
 Respond with ONLY a JSON object (no explanation):
 {{"status": "verified_accurate" | "finding" | "unverified", "severity": "correctness" | "outdated" | "policy_change" | null, "actual_value": "what docs say or null", "suggested_fix": "specific fix or null"}}
 
-Use "unverified" if the docs don't contain enough information to answer."""
+IMPORTANT RULES for choosing status:
+- Use "verified_accurate" if the docs confirm the claim is correct, even partially.
+- Use "unverified" if the docs don't contain enough specific information to confirm OR deny the claim.
+  This includes: exact URL paths, specific version numbers, exact configuration values, or any detail
+  where the docs confirm the general capability but not the specific detail claimed.
+- Use "finding" ONLY when the docs EXPLICITLY contradict the claim — e.g. the service is documented
+  as removed, deprecated, renamed, or the docs state a different specific value.
+- NEVER use "finding" just because the docs don't explicitly mention the exact detail. Absence of
+  confirmation is NOT contradiction. When in doubt, use "unverified".
+- For endpoint_url, api_name, sdk_version, and similar technical specifics: use "unverified" unless
+  the docs explicitly state a DIFFERENT value than what is claimed."""
 
             # Use Nova 2 Lite for fast, cheap judgment calls
             model = BedrockModel(
