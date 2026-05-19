@@ -233,7 +233,7 @@ class AwsDocsSearcher:
             async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=True) as client:
                 resp = await client.get(url, headers={"Accept": "text/html"})
                 if resp.status_code == 200:
-                    content = extract_text_from_html(resp.text)[:6000]
+                    content = extract_text_from_html(resp.text)[:10000]
         except Exception as exc:
             logger.debug("AwsDocsSearcher.fetch_page failed for %r: %s", url, exc)
 
@@ -241,32 +241,34 @@ class AwsDocsSearcher:
         return content
 
     async def search_and_fetch(self, query: str) -> str:
-        """Search for *query* and return content from the top result only.
+        """Search for *query* and return content from the top results.
 
-        Fetches only 1 page to keep total latency under ~15 seconds.
-        Returns up to 3000 chars of content.
+        Fetches the top 3 pages to maximise the chance of finding specific
+        details (e.g. session durations, limits) that may be deep in a page.
+        Returns up to 8000 chars of combined content.
         """
-        results = await self.search(query, limit=3)
+        results = await self.search(query, limit=5)
         if not results:
             return ""
 
         parts: list[str] = []
 
         # Always include snippets from all results (no HTTP needed)
-        for r in results[:3]:
+        for r in results[:5]:
             snippet = r.get("snippet", "")
             if snippet:
                 parts.append(f"[{r.get('title', '')}] {snippet}")
 
-        # Fetch only the top result's page
-        top_url = results[0].get("url", "")
-        if top_url:
-            page_text = await self.fetch_page(top_url)
-            if page_text:
-                parts.append(page_text[:2000])
+        # Fetch top 3 pages — more pages = better coverage of specific details
+        for r in results[:3]:
+            url = r.get("url", "")
+            if url:
+                page_text = await self.fetch_page(url)
+                if page_text:
+                    parts.append(f"--- {r.get('title', url)} ---\n{page_text[:3000]}")
 
         combined = "\n\n".join(parts)
-        return combined[:3000]
+        return combined[:8000]
 
     def search_and_fetch_sync(self, query: str) -> str:
         """Synchronous wrapper for use in Strands tool functions.

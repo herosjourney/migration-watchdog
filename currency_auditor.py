@@ -1294,7 +1294,7 @@ CLAIM: {claim.claim_text}
 QUESTION: {claim.verification_query}
 
 DOCUMENTATION:
-{docs_content[:2000]}
+{docs_content[:6000]}
 
 Respond with ONLY a JSON object (no explanation):
 {{"status": "verified_accurate" | "finding" | "unverified", "severity": "correctness" | "outdated" | "policy_change" | null, "actual_value": "what docs say or null", "suggested_fix": "specific fix or null"}}
@@ -1305,7 +1305,7 @@ Use "unverified" if the docs don't contain enough information to answer."""
             model = BedrockModel(
                 model_id="us.amazon.nova-2-lite-v1:0",
                 region_name=self._region_name,
-                max_tokens=300,
+                max_tokens=500,
             )
             agent = Agent(model=model, system_prompt="You are a precise fact-checker. Respond only with valid JSON.", tools=[])
             response_text = str(agent(prompt))
