@@ -246,7 +246,7 @@ class TestPRModeSmoke:
 
                 with patch("main.boto3.resource"):
                     with patch("main.SourceFetcher") as mock_sf_cls:
-                        mock_sf = MagicMock()
+                        mock_sf = AsyncMock()
                         mock_sf.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
                         mock_sf_cls.return_value = mock_sf
                         asyncio.run(_main_module.run_scan())
