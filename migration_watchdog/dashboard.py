@@ -215,31 +215,20 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
     """Render compact inline HTML badges for the main table row.
 
     Only shows information NOT already visible in other columns.
-    Risk is in the Risk column. Category is shown by the tab.
-    This column shows: status, review result, and the key finding signal.
+    Status is in the Status column — don't repeat it here.
     """
     parts: list[str] = []
 
-    # --- Status badge ---
-    status_val = finding.status or "pending"
-    status_styles = {
-        "pending": "color:#b0bec5; font-size:0.82em;",
-        "approved": "color:#a5d6a7; font-size:0.82em; font-weight:bold;",
-        "declined": "color:#ef9a9a; font-size:0.82em;",
-        "superseded": "color:rgba(255,255,255,0.3); font-size:0.82em;",
-    }
-    style = status_styles.get(status_val, "color:#b0bec5; font-size:0.82em;")
-    status_html = f'<span style="{style}">{_e(status_val)}</span>'
-    if dismissal_active and status_val == "pending":
-        status_html += ' <span style="color:rgba(255,255,255,0.35); font-size:0.8em;">🔕</span>'
-    parts.append(status_html)
-
-    # --- Review status (only when not None) ---
+    # --- Review status (only when not None and not confirmed — confirmed is the default/expected) ---
     review_status = finding.review_status
     if review_status == "disputed":
         parts.append('<span style="color:#ef9a9a; font-size:0.82em;">⛔ disputed</span>')
     elif review_status == "corrected":
         parts.append('<span style="color:#ffb74d; font-size:0.82em;">✏️ corrected</span>')
+
+    # --- Dismissal indicator ---
+    if dismissal_active and finding.status == "pending":
+        parts.append('<span style="color:rgba(255,255,255,0.4); font-size:0.8em;">🔕 dismissed</span>')
 
     # --- PR URL link ---
     if finding.pr_url:
@@ -253,7 +242,6 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
     payload = finding.auditor_payload or {}
 
     if schema.startswith("currency/"):
-        # Show what kind of problem: wrong fact, stale info, or policy change
         severity = payload.get("severity")
         sev_map = {
             "correctness": ("🔴 Factually wrong", "#ff5252"),
@@ -266,7 +254,6 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
             parts.append(f'<span style="color:{color}; font-size:0.82em;">{label}</span>')
 
     elif schema.startswith("automation/"):
-        # Show automation status in plain English
         gap_type = payload.get("gap_type")
         gap_map = {
             "full_gap": ("🔴 No automation exists", "#ff5252"),
@@ -285,7 +272,7 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
         if issue_type:
             parts.append(f'<span style="color:#ef9a9a; font-size:0.82em;">🔒 {_e(issue_type)}</span>')
 
-    return " ".join(parts)
+    return " ".join(parts) if parts else '<span style="color:rgba(255,255,255,0.3); font-size:0.82em;">—</span>'
 
 
 def _render_currency_payload(payload: dict, finding: Finding) -> str:
@@ -381,7 +368,7 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
     return (
         "<details>"
         "<summary style='cursor:pointer; color:#90c8ff;'>Currency Finding Details</summary>"
-        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.2); border-radius:0 0 8px 8px;">{inner}</div>'
+        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.35); border-radius:0 0 8px 8px; border:1px solid rgba(255,255,255,0.08);">{inner}</div>'
         "</details>"
     )
 
@@ -536,7 +523,7 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
     return (
         "<details>"
         "<summary style='cursor:pointer; color:#ce93d8;'>Automation Finding Details</summary>"
-        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.2); border-radius:0 0 8px 8px;">{inner}</div>'
+        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.35); border-radius:0 0 8px 8px; border:1px solid rgba(255,255,255,0.08);">{inner}</div>'
         "</details>"
     )
 
@@ -760,8 +747,8 @@ def _render_general_finding_detail(finding: Finding) -> str:
     inner = "\n".join(parts)
     return (
         "<details open>"
-        "<summary style='cursor:pointer; font-weight:bold;'>Finding Details</summary>"
-        f'<div style="padding:8px 12px; border:1px solid #e0e0e0; border-radius:4px; margin-top:4px;">{inner}</div>'
+        "<summary style='cursor:pointer; font-weight:bold; color:#90c8ff;'>Finding Details</summary>"
+        f'<div style="padding:8px 12px; border:1px solid rgba(255,255,255,0.1); border-radius:4px; margin-top:4px; background:rgba(0,0,0,0.35); color:#e0e0e0;">{inner}</div>'
         "</details>"
     )
 
@@ -1164,9 +1151,28 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
         for f, finding_obj in group_findings:
             review_badge = ""
             if f.get("review_status"):
-                badge_colors = {"confirmed": "green", "corrected": "orange", "disputed": "red"}
-                color = badge_colors.get(f["review_status"], "gray")
-                review_badge = f'<span style="color:{color}; font-weight:bold;">{f["review_status"]}</span>'
+                badge_colors = {
+                    "confirmed": "#a5d6a7",
+                    "corrected": "#ffb74d",
+                    "disputed": "#ef9a9a",
+                }
+                badge_labels = {
+                    "confirmed": "✅ verified",
+                    "corrected": "✏️ corrected",
+                    "disputed": "⛔ disputed",
+                }
+                badge_titles = {
+                    "confirmed": "The AI review agent independently verified this finding is accurate",
+                    "corrected": "The AI review agent found inaccuracies and corrected the finding",
+                    "disputed": "The AI review agent disagrees — review carefully before approving",
+                }
+                rs = f["review_status"]
+                color = badge_colors.get(rs, "#aaa")
+                label = badge_labels.get(rs, rs)
+                title = badge_titles.get(rs, "")
+                review_badge = (
+                    f'<span style="color:{color}; font-size:0.82em;" title="{_e(title)}">{label}</span>'
+                )
 
             extra_info = ""
             if f.get("review_status") == "disputed" and f.get("primary_reasoning"):
@@ -1224,8 +1230,8 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
 
         return f"""<table>
             <thead><tr>
-                <th>Risk</th><th>Review</th><th>Title</th><th>Affected Files</th>
-                <th>Scan Date</th><th>Status</th><th>Badges</th><th>Actions</th>
+                <th>Risk</th><th>AI Review</th><th>Title</th><th>Affected Files</th>
+                <th>Scan Date</th><th>Status</th><th>Finding Signal</th><th>Actions</th>
             </tr></thead>
             <tbody>{table_rows}</tbody>
         </table>"""    # Build tab content
