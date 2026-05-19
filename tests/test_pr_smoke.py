@@ -237,19 +237,20 @@ class TestPRModeSmoke:
             for app_var in ("GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_INSTALLATION_ID"):
                 os.environ.pop(app_var, None)
 
-            with patch("main.httpx.AsyncClient") as mock_client_cls:
+            with patch.object(_main_module, "SourceFetcher") as mock_sf_cls, \
+                 patch.object(_main_module, "boto3") as mock_boto3, \
+                 patch("main.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
                 mock_client.get = AsyncMock(side_effect=Exception("no network"))
                 mock_client_cls.return_value = mock_client
+                mock_boto3.resource = MagicMock()
 
-                with patch("main.boto3.resource"):
-                    with patch("main.SourceFetcher") as mock_sf_cls:
-                        mock_sf = AsyncMock()
-                        mock_sf.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
-                        mock_sf_cls.return_value = mock_sf
-                        asyncio.run(_main_module.run_scan())
+                mock_sf = AsyncMock()
+                mock_sf.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
+                mock_sf_cls.return_value = mock_sf
+                asyncio.run(_main_module.run_scan())
 
         except SystemExit as exc:
             # run_scan calls sys.exit(1) on failure — treat as test failure
