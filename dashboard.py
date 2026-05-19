@@ -380,25 +380,55 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
     actual_value = payload.get("actual_value")
     suggested_fix = payload.get("suggested_fix")
 
+    # Detect when suggested_fix is actually a "couldn't verify" message from the AI
+    # rather than a real actionable fix
+    _unverifiable_phrases = (
+        "the documentation excerpt",
+        "the provided documentation",
+        "cannot be verified",
+        "could not be verified",
+        "additional documentation",
+        "would be required",
+        "does not mention",
+        "does not address",
+    )
+    fix_is_unverifiable = suggested_fix and any(
+        p in suggested_fix.lower() for p in _unverifiable_phrases
+    )
+
     if actual_value or suggested_fix:
-        fix_html = '<div style="background:rgba(165,214,167,0.08); border:1px solid rgba(165,214,167,0.25); border-radius:10px; padding:16px 18px;">'
-        fix_html += '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; color:rgba(165,214,167,0.6); margin-bottom:10px;">How to resolve this</div>'
-        if actual_value:
-            fix_html += (
-                f'<div style="margin-bottom:10px;">'
-                f'<div style="font-size:0.8em; color:rgba(255,255,255,0.45); margin-bottom:4px;">Current reality</div>'
-                f'<div style="color:#a5d6a7; font-size:0.92em; line-height:1.6;">{_e(actual_value)}</div>'
-                f'</div>'
+        if fix_is_unverifiable and not actual_value:
+            # Show as a neutral "verification note" rather than a green fix card
+            sections.append(
+                '<div style="background:rgba(144,164,174,0.08); border:1px solid rgba(144,164,174,0.25); '
+                'border-radius:10px; padding:16px 18px;">'
+                '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; '
+                'color:rgba(144,164,174,0.7); margin-bottom:10px;">⚠️ Verification note</div>'
+                '<div style="color:rgba(255,255,255,0.6); font-size:0.88em; line-height:1.7;">'
+                'The AI could not find a specific AWS documentation page to verify or refute this claim. '
+                'This finding may need manual review against the relevant AWS service documentation.'
+                '</div>'
+                '</div>'
             )
-        if suggested_fix:
-            fix_html += (
-                f'<div>'
-                f'<div style="font-size:0.8em; color:rgba(255,255,255,0.45); margin-bottom:4px;">Suggested fix</div>'
-                f'<div style="color:#c8e6c9; font-size:0.92em; line-height:1.6;">{_e(suggested_fix)}</div>'
-                f'</div>'
-            )
-        fix_html += '</div>'
-        sections.append(fix_html)
+        else:
+            fix_html = '<div style="background:rgba(165,214,167,0.08); border:1px solid rgba(165,214,167,0.25); border-radius:10px; padding:16px 18px;">'
+            fix_html += '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; color:rgba(165,214,167,0.6); margin-bottom:10px;">How to resolve this</div>'
+            if actual_value:
+                fix_html += (
+                    f'<div style="margin-bottom:10px;">'
+                    f'<div style="font-size:0.8em; color:rgba(255,255,255,0.45); margin-bottom:4px;">Current reality</div>'
+                    f'<div style="color:#a5d6a7; font-size:0.92em; line-height:1.6;">{_e(actual_value)}</div>'
+                    f'</div>'
+                )
+            if suggested_fix and not fix_is_unverifiable:
+                fix_html += (
+                    f'<div>'
+                    f'<div style="font-size:0.8em; color:rgba(255,255,255,0.45); margin-bottom:4px;">Suggested fix</div>'
+                    f'<div style="color:#c8e6c9; font-size:0.92em; line-height:1.6;">{_e(suggested_fix)}</div>'
+                    f'</div>'
+                )
+            fix_html += '</div>'
+            sections.append(fix_html)
 
     # --- Source and scope (compact footer row) ---
     footer_parts: list[str] = []
@@ -1333,7 +1363,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             table_rows += f"""
             <tr>
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
-                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;">⏳ Pending review</span>'}</td>
+                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="The second AI reviewer has not checked this finding yet">🔍 Not yet reviewed</span>'}</td>
                 <td>{_e(f['title'])}</td>
                 <td style="font-size:0.8em; color:#b0bec5;">{_e(', '.join(f['affected_files']))}</td>
                 <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>
@@ -1347,7 +1377,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             if extra_info:
                 table_rows += f"""
             <tr>
-                <td colspan="8" style="padding:4px 12px; background:#fafafa;">{extra_info}</td>
+                <td colspan="8" style="padding:12px 16px; background:rgba(15,20,50,0.95); border-top:1px solid rgba(255,255,255,0.06);">{extra_info}</td>
             </tr>"""
 
         return f"""<table>

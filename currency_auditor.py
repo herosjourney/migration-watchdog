@@ -187,8 +187,15 @@ DO NOT extract:
 
 DO extract:
 - Specific region names or counts (e.g., "available in 9 regions", "us-east-1, eu-west-1, ...")
-- Specific prices or pricing tiers (e.g., "$0.048 per vCPU-hour")
-- Quota limits (e.g., "default limit of 500 tasks per cluster")
+- Specific prices or pricing tiers — use claim_type: price for ALL of these:
+  - Unit prices (e.g., "$0.048 per vCPU-hour", "$0.12 per ACU-hour")
+  - Monthly cost estimates (e.g., "~$43–58/mo", "approximately $200/month")
+  - Price ranges tied to a service (e.g., "Aurora Serverless v2 costs ~$43–58/mo")
+  - Pricing tiers (e.g., "first 1M requests free, then $0.20 per million")
+  Set "service" to the normalized service key (e.g., "aurora", "fargate", "bedrock")
+  Set "metric" to the normalized metric (e.g., "per_acu_hour", "per_month_estimate", "per_vcpu_hour")
+- Quota limits — use claim_type: quota_limit ONLY for hard service limits, NOT prices:
+  (e.g., "default limit of 500 tasks per cluster", "max 10 concurrent executions")
 - Service throughput limits (e.g., "10,000 RPM shared account limit", "2M output TPM cap") — use claim_type: service_limit
 - Preview/GA status (e.g., "AgentCore Harness is in public preview", "available in 4 regions only") — use claim_type: preview_status
 - Service names and their current status (e.g., "Amazon ECS Fargate is generally available")
@@ -197,6 +204,12 @@ DO extract:
 - Model IDs or model names (e.g., "Claude Sonnet 4.6", "anthropic.claude-sonnet-4-5-20251001-v1:0")
 - EOL / end-of-support dates (e.g., "support ends June 2026")
 - Other objectively verifiable factual assertions
+
+CRITICAL CLASSIFICATION RULE — price vs quota_limit:
+- If the claim contains a dollar amount ($), it is ALWAYS claim_type: price — never quota_limit
+- "min 0.5 ACU, ~$43–58/mo" → price (contains dollar amount)
+- "default limit of 500 tasks" → quota_limit (no dollar amount, it's a count limit)
+- "10,000 RPM limit" → service_limit (throughput limit, no dollar amount)
 
 For each claim, output a JSON object with these fields:
 - "claim_text": verbatim text of the claim (exact quote from the document)
