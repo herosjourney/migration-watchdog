@@ -239,17 +239,22 @@ class TestPRModeSmoke:
 
             with patch.object(_main_module, "SourceFetcher") as mock_sf_cls, \
                  patch.object(_main_module, "boto3") as mock_boto3, \
-                 patch("main.httpx.AsyncClient") as mock_client_cls:
+                 patch.object(_main_module, "httpx") as mock_httpx:
+                # Mock httpx.AsyncClient for the PR comment posting path
                 mock_client = AsyncMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
                 mock_client.get = AsyncMock(side_effect=Exception("no network"))
-                mock_client_cls.return_value = mock_client
+                mock_httpx.AsyncClient.return_value = mock_client
+
+                # Mock boto3.resource for DynamoDB
                 mock_boto3.resource = MagicMock()
 
+                # Mock SourceFetcher with async fetch_all_sources
                 mock_sf = AsyncMock()
                 mock_sf.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
                 mock_sf_cls.return_value = mock_sf
+
                 asyncio.run(_main_module.run_scan())
 
         except SystemExit as exc:
