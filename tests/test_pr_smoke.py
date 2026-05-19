@@ -115,12 +115,14 @@ _mw_security = sys.modules["migration_watchdog.security_auditor"]
 _mw_security.run_security_audit = AsyncMock(return_value=[])
 _mw_security.security_dedupe_key = MagicMock(side_effect=lambda f: (f.category, frozenset(f.affected_files), f.finding_id))
 
-# Stub pr_commenter — provide the four functions main.py imports
+# Wire real pr_commenter helpers so _post_pr_comment writes audit-report.json
+import pr_commenter as _pr_commenter_real  # noqa: E402
+
 _mw_pr_commenter = sys.modules["migration_watchdog.pr_commenter"]
-_mw_pr_commenter._finding_severity = MagicMock(return_value="outdated")
-_mw_pr_commenter._should_include_in_pr_comment = MagicMock(return_value=True)
-_mw_pr_commenter._build_pr_comment_markdown = MagicMock(return_value="<!-- watchdog-audit-comment -->")
-_mw_pr_commenter._post_pr_comment = AsyncMock()
+_mw_pr_commenter._finding_severity = _pr_commenter_real._finding_severity
+_mw_pr_commenter._should_include_in_pr_comment = _pr_commenter_real._should_include_in_pr_comment
+_mw_pr_commenter._build_pr_comment_markdown = _pr_commenter_real._build_pr_comment_markdown
+_mw_pr_commenter._post_pr_comment = _pr_commenter_real._post_pr_comment
 
 # Stub scan_config — provide ScanConfig with from_env()
 import dataclasses as _dc
@@ -238,13 +240,14 @@ class TestPRModeSmoke:
                 os.environ.pop(app_var, None)
 
             with patch.object(_main_module, "boto3") as mock_boto3, \
-                 patch.object(_main_module, "httpx") as mock_httpx:
-                # Mock httpx.AsyncClient for the PR comment posting path
+                 patch.object(_pr_commenter_real.httpx, "AsyncClient") as mock_client_cls:
+                # Patch AsyncClient only — do not replace the whole httpx module,
+                # or except httpx.HTTPStatusError breaks (mock is not BaseException).
                 mock_client = AsyncMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
                 mock_client.get = AsyncMock(side_effect=Exception("no network"))
-                mock_httpx.AsyncClient.return_value = mock_client
+                mock_client_cls.return_value = mock_client
 
                 # Mock boto3.resource for DynamoDB
                 mock_boto3.resource = MagicMock()

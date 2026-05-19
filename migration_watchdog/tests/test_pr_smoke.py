@@ -239,13 +239,14 @@ class TestPRModeSmoke:
 
             with patch.object(_main_module, "SourceFetcher") as mock_sf_cls, \
                  patch.object(_main_module, "boto3") as mock_boto3, \
-                 patch.object(_main_module, "httpx") as mock_httpx:
-                # Mock httpx.AsyncClient for the PR comment posting path
+                 patch.object(_main_module.httpx, "AsyncClient") as mock_client_cls:
+                # Patch AsyncClient only — do not replace the whole httpx module,
+                # or except httpx.HTTPStatusError breaks (mock is not BaseException).
                 mock_client = AsyncMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
                 mock_client.get = AsyncMock(side_effect=Exception("no network"))
-                mock_httpx.AsyncClient.return_value = mock_client
+                mock_client_cls.return_value = mock_client
 
                 # Mock boto3.resource for DynamoDB
                 mock_boto3.resource = MagicMock()
