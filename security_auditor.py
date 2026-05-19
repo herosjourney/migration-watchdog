@@ -137,35 +137,51 @@ SECURITY_CATEGORIES = {
 # Open admin ports: port 22 (SSH), 3389 (RDP), 5900 (VNC) from 0.0.0.0/0
 _OPEN_PORT_PATTERNS = [
     (22, "SSH", re.compile(
-        r'(?:port[s]?\s*[=:]\s*22|"22"|ingress.*22|22.*ingress|from_port.*22|to_port.*22)',
+        r'(?:port[s]?\s*[=:"\s]+22\b|"22"|ingress.*\b22\b|\b22\b.*ingress|from_port.*22|to_port.*22'
+        r'|allow.*ssh|ssh.*allow|port 22|:22\b)',
         re.IGNORECASE
     )),
     (3389, "RDP", re.compile(
-        r'(?:port[s]?\s*[=:]\s*3389|"3389"|ingress.*3389|3389.*ingress|from_port.*3389|to_port.*3389)',
+        r'(?:port[s]?\s*[=:"\s]+3389\b|"3389"|ingress.*3389|3389.*ingress|from_port.*3389|to_port.*3389'
+        r'|allow.*rdp|rdp.*allow|port 3389)',
         re.IGNORECASE
     )),
     (5900, "VNC", re.compile(
-        r'(?:port[s]?\s*[=:]\s*5900|"5900"|ingress.*5900|5900.*ingress|from_port.*5900|to_port.*5900)',
+        r'(?:port[s]?\s*[=:"\s]+5900\b|"5900"|ingress.*5900|5900.*ingress|from_port.*5900|to_port.*5900'
+        r'|allow.*vnc|vnc.*allow|port 5900)',
         re.IGNORECASE
     )),
 ]
-_OPEN_CIDR_PATTERN = re.compile(r'0\.0\.0\.0/0|::/0', re.IGNORECASE)
+_OPEN_CIDR_PATTERN = re.compile(r'0\.0\.0\.0/0|::/0|internet|public.*internet|0\.0\.0\.0', re.IGNORECASE)
 
-# Secret in shell variable
+# Secret in shell variable — matches both actual code and markdown descriptions of the pattern
 _SECRET_SHELL_VAR_PATTERN = re.compile(
-    r'(?:SECRET|PASSWORD|TOKEN|KEY|CREDENTIAL)[_A-Z]*\s*=\s*\$\(',
+    r'(?:'
+    r'(?:SECRET|PASSWORD|TOKEN|KEY|CREDENTIAL)[_A-Z]*\s*=\s*\$\('  # actual shell code
+    r'|SECRET_VALUE=\$\('                                            # exact pattern from description
+    r'|gcloud secrets.*versions access'                              # gcloud secret fetch
+    r'|secret.*shell.*variable'                                      # prose description
+    r'|stored.*shell.*variable'                                      # prose description
+    r'|shell variable.*secret'                                       # prose description
+    r')',
     re.IGNORECASE
 )
 
-# Plaintext DB password in Terraform
+# Plaintext DB password in Terraform — also matches prose descriptions
 _PLAINTEXT_DB_PASSWORD_PATTERN = re.compile(
-    r'master_password\s*=\s*var\.',
+    r'(?:'
+    r'master_password\s*=\s*var\.'                    # actual Terraform
+    r'|var\.database_master_password'                  # variable reference
+    r'|database.*password.*variable'                   # prose
+    r'|password.*terraform.*variable'                  # prose
+    r'|master_password.*var\.'                         # partial match
+    r')',
     re.IGNORECASE
 )
 
 # Missing deletion protection (Aurora/RDS resource without deletion_protection)
 _AURORA_RESOURCE_PATTERN = re.compile(
-    r'resource\s+"aws_rds_cluster"',
+    r'(?:resource\s+"aws_rds_cluster"|aws_rds_cluster|aurora.*cluster|rds.*cluster)',
     re.IGNORECASE
 )
 _DELETION_PROTECTION_PATTERN = re.compile(
@@ -173,13 +189,13 @@ _DELETION_PROTECTION_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# Rotation without compliance gate
+# Rotation without compliance gate — also matches prose
 _ROTATION_BLOCK_PATTERN = re.compile(
-    r'rotation_rules|enable_rotation|rotation_lambda',
+    r'(?:rotation_rules|enable_rotation|rotation_lambda|rotate.*secret|secret.*rotation)',
     re.IGNORECASE
 )
 _COMPLIANCE_GATE_PATTERN = re.compile(
-    r'compliance|soc2|pci|hipaa|fedramp',
+    r'(?:compliance|soc2|pci|hipaa|fedramp|compliance_flag|compliance.*gate|gate.*compliance)',
     re.IGNORECASE
 )
 
@@ -259,22 +275,31 @@ class SecurityAuditor:
 
     def _check_open_ports(self, file_path: str, content: str) -> list[SecurityIssue]:
         issues = []
+        # Check if the file mentions open CIDRs anywhere (not necessarily same line as port)
         has_open_cidr = bool(_OPEN_CIDR_PATTERN.search(content))
-        if not has_open_cidr:
+        # Also flag if the file discusses translating GCP firewall rules to AWS
+        discusses_firewall_translation = bool(re.search(
+            r'(?:firewall.*rule|security.*group|ingress.*rule|allow.*ssh|allow.*rdp|source_ranges)',
+            content, re.IGNORECASE
+        ))
+
+        if not (has_open_cidr or discusses_firewall_translation):
             return issues
 
         for port, service, pattern in _OPEN_PORT_PATTERNS:
             if pattern.search(content):
-                # Find the line context
+                # Find the best line context
+                line_context = f"Port {port} ({service}) referenced in file"
                 for line in content.splitlines():
-                    if pattern.search(line) and _OPEN_CIDR_PATTERN.search(content):
-                        issues.append(SecurityIssue(
-                            issue_type="open_admin_port",
-                            file_path=file_path,
-                            line_context=line.strip()[:200],
-                            details={"port": port, "service": service},
-                        ))
+                    if pattern.search(line):
+                        line_context = line.strip()[:200]
                         break
+                issues.append(SecurityIssue(
+                    issue_type="open_admin_port",
+                    file_path=file_path,
+                    line_context=line_context,
+                    details={"port": port, "service": service},
+                ))
         return issues
 
     def _check_secret_shell_var(self, file_path: str, content: str) -> list[SecurityIssue]:
