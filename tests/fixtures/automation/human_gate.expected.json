@@ -1,0 +1,15 @@
+{
+  "findings_count_min": 1,
+  "findings": [
+    {
+      "category": "automation_gap",
+      "finding_schema_version": "automation/1.0",
+      "risk_level": "medium",
+      "auditor_payload": {
+        "human_gate": "required",
+        "safety_impact": "iam_change",
+        "automate_recommended": "yes"
+      }
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "entries": [
+    {
+      "keywords": ["service quotas", "quota increase", "request quota", "increase quota", "quota request"],
+      "action_types": ["console_navigation", "form_submission"],
+      "cli_equivalent": "aws service-quotas request-service-quota-increase --service-code {service_code} --quota-code {quota_code} --desired-value {desired_value}",
+      "placeholder_list": ["service_code", "quota_code", "desired_value"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/service-quotas/request-service-quota-increase.html"
+    },
+    {
+      "keywords": ["iam", "create role", "iam role", "create iam role", "new role"],
+      "action_types": ["console_navigation", "browser_action", "form_submission"],
+      "cli_equivalent": "aws iam create-role --role-name {role_name} --assume-role-policy-document {policy_document}",
+      "placeholder_list": ["role_name", "policy_document"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/iam/create-role.html"
+    },
+    {
+      "keywords": ["s3 bucket", "create bucket", "new bucket", "s3 create"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws s3api create-bucket --bucket {bucket_name} --region {region} --create-bucket-configuration LocationConstraint={region}",
+      "placeholder_list": ["bucket_name", "region"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/s3api/create-bucket.html"
+    },
+    {
+      "keywords": ["ecs service", "create ecs service", "ecs create service", "elastic container service"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws ecs create-service --cluster {cluster_name} --service-name {service_name} --task-definition {task_definition} --desired-count {desired_count} --launch-type {launch_type}",
+      "placeholder_list": ["cluster_name", "service_name", "task_definition", "desired_count", "launch_type"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/ecs/create-service.html"
+    },
+    {
+      "keywords": ["lambda function", "create lambda", "create function", "lambda create"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws lambda create-function --function-name {function_name} --runtime {runtime} --role {role_arn} --handler {handler} --zip-file fileb://{zip_file}",
+      "placeholder_list": ["function_name", "runtime", "role_arn", "handler", "zip_file"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/lambda/create-function.html"
+    },
+    {
+      "keywords": ["dynamodb table", "create table", "dynamodb create", "create dynamodb"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws dynamodb create-table --table-name {table_name} --attribute-definitions {attribute_definitions} --key-schema {key_schema} --billing-mode {billing_mode}",
+      "placeholder_list": ["table_name", "attribute_definitions", "key_schema", "billing_mode"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/dynamodb/create-table.html"
+    },
+    {
+      "keywords": ["cloudwatch log group", "create log group", "log group", "cloudwatch logs"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws logs create-log-group --log-group-name {log_group_name}",
+      "placeholder_list": ["log_group_name"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/logs/create-log-group.html"
+    },
+    {
+      "keywords": ["bedrock", "model invocation", "bedrock quota", "invoke model", "bedrock model quota", "model access"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws service-quotas get-service-quota --service-code bedrock --quota-code {quota_code}",
+      "placeholder_list": ["quota_code"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/service-quotas/get-service-quota.html"
+    }
+  ]
+}

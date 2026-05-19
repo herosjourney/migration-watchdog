@@ -1,0 +1,13 @@
+{
+  "findings_count_min": 1,
+  "findings": [
+    {
+      "category": "automation_gap",
+      "finding_schema_version": "automation/1.0",
+      "auditor_payload": {
+        "gap_type": "partial_gap",
+        "confidence": "medium"
+      }
+    }
+  ]
+}
