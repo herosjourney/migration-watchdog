@@ -255,14 +255,18 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
 
     elif schema.startswith("automation/"):
         gap_type = payload.get("gap_type")
-        gap_map = {
-            "full_gap": ("🔴 No automation exists", "#ff5252"),
-            "partial_gap": ("🟡 Partially automated", "#ffb74d"),
-            "no_gap": ("✅ Already automated", "#a5d6a7"),
-        }
-        if gap_type in gap_map:
-            label, color = gap_map[gap_type]
+        cli_equivalent = payload.get("cli_equivalent")
+        # If a CLI equivalent exists, the point is "this CAN be automated" not "nothing exists"
+        if gap_type == "full_gap":
+            if cli_equivalent:
+                label, color = ("🔴 Could be automated with AWS CLI", "#ff5252")
+            else:
+                label, color = ("🔴 No CLI equivalent found", "#ff5252")
             parts.append(f'<span style="color:{color}; font-size:0.82em;">{label}</span>')
+        elif gap_type == "partial_gap":
+            parts.append('<span style="color:#ffb74d; font-size:0.82em;">🟡 Partially automated</span>')
+        elif gap_type == "no_gap":
+            parts.append('<span style="color:#a5d6a7; font-size:0.82em;">✅ Already automated</span>')
 
         if payload.get("human_gate") == "required":
             parts.append('<span style="color:#ce93d8; font-size:0.82em;">🔒 needs approval</span>')
@@ -271,6 +275,26 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
         issue_type = (payload.get("issue_type") or "").replace("_", " ")
         if issue_type:
             parts.append(f'<span style="color:#ef9a9a; font-size:0.82em;">🔒 {_e(issue_type)}</span>')
+
+    else:
+        # Analysis Agent / Refactoring Agent findings — show category in plain English
+        _category_labels = {
+            "guidance_update": ("📋 Guidance update needed", "#90c8ff"),
+            "new_content": ("✨ New content opportunity", "#90c8ff"),
+            "pricing": ("💰 Pricing may be stale", "#ffb74d"),
+            "model_deprecation": ("⚠️ Model deprecated", "#ffb74d"),
+            "new_model": ("🆕 New model available", "#a5d6a7"),
+            "structural": ("🏗️ Structural improvement", "#ce93d8"),
+            "core_removal": ("🔴 Core content removed", "#ff5252"),
+            "refactoring": ("🔧 Refactoring suggested", "#ce93d8"),
+        }
+        category = finding.category or ""
+        if category in _category_labels:
+            label, color = _category_labels[category]
+            parts.append(f'<span style="color:{color}; font-size:0.82em;">{label}</span>')
+        elif category:
+            # Unknown category — show it cleaned up
+            parts.append(f'<span style="color:rgba(255,255,255,0.5); font-size:0.82em;">{_e(category.replace("_", " ").title())}</span>')
 
     return " ".join(parts) if parts else '<span style="color:rgba(255,255,255,0.3); font-size:0.82em;">—</span>'
 
@@ -506,74 +530,104 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
 def _render_automation_payload(payload: dict, finding: Finding) -> str:
     """Render a ``<details>`` panel for an automation/1.0 finding.
 
-    Shows action text, action type, gap type + confidence + reason,
-    gap detail narrative, CLI equivalent as a code block, reference URL,
-    placeholder list, judgment inputs, automate recommendation, human gate
-    warning, rationale, scope, and a static-analysis caveat note.
-
-    All user-derived values are escaped with ``_e()``.
+    Uses plain-English labels throughout — no internal field names shown to users.
     """
     parts: list[str] = []
 
-    # --- Action text ---
+    # --- Plain-English translations for technical values ---
+    _action_type_labels = {
+        "console_navigation": "Manual console step — user must navigate the AWS console",
+        "cli_command": "CLI command — can be run from the terminal",
+        "api_call": "API call — can be automated via code",
+        "config_change": "Configuration change",
+        "iam_policy": "IAM / permissions change",
+        "quota_request": "Service quota increase request",
+        "manual_approval": "Requires manual approval",
+        "file_edit": "File or configuration edit",
+    }
+    _gap_type_labels = {
+        "full_gap": "🔴 Not automated — no script exists for this step yet",
+        "partial_gap": "🟡 Partially automated — a script exists but doesn't cover this step",
+        "no_gap": "✅ Already automated — the generated script handles this",
+    }
+    _gap_reason_labels = {
+        "missing_generated_artifact": "The setup script for this step hasn't been generated yet",
+        "cli_not_in_script": "An AWS CLI command exists for this but isn't in the script",
+        "no_cli_equivalent": "No AWS CLI command exists for this action",
+        "human_decision_required": "This step requires a human decision before it can run",
+        "not_automatable": "This type of action can't be automated",
+        "partial_coverage": "The script covers part of this but not all of it",
+    }
+    _confidence_labels = {
+        "high": "high confidence",
+        "medium": "medium confidence",
+        "low": "low confidence — verify manually",
+    }
+
+    # --- Manual action (the step the plugin tells users to do) ---
     action_text = payload.get("action_text")
     if action_text is not None:
         parts.append(
-            f"<p><strong>Manual action:</strong> &ldquo;{_e(action_text)}&rdquo;</p>"
+            f'<div style="background:rgba(255,255,255,0.05); border-radius:8px; padding:12px 16px; margin-bottom:4px;">'
+            f'<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; color:rgba(255,255,255,0.4); margin-bottom:6px;">What the plugin tells users to do manually</div>'
+            f'<div style="color:#fff; font-style:italic; line-height:1.6;">&ldquo;{_e(action_text)}&rdquo;</div>'
+            f'</div>'
         )
 
-    # --- Action type ---
+    # --- Action type (translated) ---
     action_type = payload.get("action_type")
     if action_type is not None:
-        parts.append(f"<p><strong>Action type:</strong> {_e(action_type)}</p>")
+        label = _action_type_labels.get(action_type, action_type.replace("_", " ").title())
+        parts.append(f'<p style="color:rgba(255,255,255,0.65); font-size:0.88em;">📋 {_e(label)}</p>')
 
-    # --- Gap type + confidence + reason (when reason is not None) ---
+    # --- Gap status (translated) ---
     gap_type = payload.get("gap_type")
     confidence = payload.get("confidence")
     reason = payload.get("reason")
     if gap_type is not None:
-        gap_str = _e(gap_type)
-        if confidence is not None:
-            gap_str += f" ({_e(confidence)} confidence)"
-        parts.append(f"<p><strong>Gap:</strong> {gap_str}</p>")
+        gap_label = _gap_type_labels.get(gap_type, gap_type.replace("_", " ").title())
+        conf_label = _confidence_labels.get(confidence, "") if confidence else ""
+        conf_suffix = f' <span style="color:rgba(255,255,255,0.4); font-size:0.85em;">({conf_label})</span>' if conf_label else ""
+        parts.append(f'<p style="font-size:0.92em;">{gap_label}{conf_suffix}</p>')
     if reason is not None:
-        parts.append(f"<p><strong>Gap reason:</strong> {_e(reason)}</p>")
+        reason_label = _gap_reason_labels.get(reason, reason.replace("_", " ").capitalize())
+        parts.append(f'<p style="color:rgba(255,255,255,0.6); font-size:0.85em;">Why: {_e(reason_label)}</p>')
 
-    # --- Gap detail / partial_gap_narrative ---
+    # --- Gap detail narrative ---
     partial_gap_narrative = payload.get("partial_gap_narrative")
     if partial_gap_narrative is not None:
-        parts.append(
-            f"<p><strong>Gap detail:</strong> {_e(partial_gap_narrative)}</p>"
-        )
+        parts.append(f'<p style="color:rgba(255,255,255,0.7); font-size:0.88em; line-height:1.6;">{_e(partial_gap_narrative)}</p>')
 
-    # --- CLI equivalent as <pre><code> block ---
+    # --- CLI equivalent ---
     cli_equivalent = payload.get("cli_equivalent")
     if cli_equivalent is not None:
         parts.append(
-            f"<p><strong>CLI equivalent:</strong></p>"
-            f"<pre><code>{_e(cli_equivalent)}</code></pre>"
+            '<div style="margin:8px 0;">'
+            '<div style="font-size:0.78em; color:rgba(255,255,255,0.45); margin-bottom:4px;">AWS CLI command that could automate this</div>'
+            f'<pre style="background:rgba(0,0,0,0.4); padding:10px 14px; border-radius:6px; overflow-x:auto; margin:0;"><code style="color:#b0e0ff; font-size:0.88em;">{_e(cli_equivalent)}</code></pre>'
+            '</div>'
         )
     else:
         cli_note = payload.get("cli_note")
         if cli_note is not None:
-            parts.append(
-                f"<p><strong>CLI equivalent:</strong> <em>{_e(cli_note)}</em></p>"
-            )
+            parts.append(f'<p style="color:rgba(255,255,255,0.6); font-size:0.88em;"><em>{_e(cli_note)}</em></p>')
 
-    # --- Reference URL as clickable link ---
+    # --- Reference URL ---
     reference_url = payload.get("reference_url")
     if reference_url is not None:
         parts.append(
-            f'<p><strong>Reference:</strong> '
-            f'<a href="{_e(reference_url)}" target="_blank">{_e(reference_url)}</a></p>'
+            f'<p style="font-size:0.85em;"><span style="color:rgba(255,255,255,0.4);">Reference: </span>'
+            f'<a href="{_e(reference_url)}" target="_blank" style="color:#90c8ff;">{_e(reference_url[:80])}{"…" if len(reference_url) > 80 else ""}</a></p>'
         )
 
-    # --- Placeholder list (comma-separated) ---
+    # --- Placeholders (translated) ---
     placeholder_list = payload.get("placeholder_list")
     if placeholder_list and isinstance(placeholder_list, list):
-        escaped_placeholders = ", ".join(_e(str(p)) for p in placeholder_list)
         parts.append(
-            f"<p><strong>Placeholders:</strong> {escaped_placeholders}</p>"
+            '<p style="font-size:0.85em; color:rgba(255,255,255,0.55);">'
+            '📝 Values you\'ll need to fill in: '
+            + ', '.join(f'<code style="background:rgba(255,255,255,0.1); padding:1px 5px; border-radius:3px; color:#b0e0ff;">{_e(str(p))}</code>' for p in placeholder_list)
+            + '</p>'
         )
 
     # --- Plain-English assessment ---
@@ -585,75 +639,70 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
 
     assessment_lines = []
     if judgment_required is True:
-        assessment_lines.append("⚠️ Requires human judgment before executing — values or decisions can't be determined automatically.")
+        assessment_lines.append("⚠️ A human needs to make a decision before this can run — it can't be fully automated.")
     elif judgment_required is False:
-        assessment_lines.append("✅ No human judgment needed — this step can be fully automated.")
-
+        assessment_lines.append("✅ No human decision needed — this step can be fully automated.")
     if repeated_operation is True:
-        assessment_lines.append("🔁 This is a repeated operation — automating it would save significant time across multiple runs.")
-    
+        assessment_lines.append("🔁 This step runs repeatedly — automating it would save significant time.")
     if values_precomputed is False and judgment_required is False:
-        assessment_lines.append("📋 Input values need to be looked up or calculated before running the CLI command.")
+        assessment_lines.append("📋 Some input values need to be looked up before running the CLI command.")
     elif values_precomputed is True:
-        assessment_lines.append("✅ All required input values are already available.")
-
+        assessment_lines.append("✅ All required values are already known.")
     if safety_impact:
         safety_labels = {
-            "quota_increase": "⚠️ Safety consideration: this action increases a service quota — review limits before automating.",
-            "iam_change": "⚠️ Safety consideration: this action modifies IAM permissions — requires careful review.",
-            "data_deletion": "🔴 Safety consideration: this action deletes data — should never be automated without confirmation.",
-            "cost_impact": "💰 Safety consideration: this action may incur costs — verify pricing before automating.",
+            "quota_increase": "⚠️ This increases a service quota — review the new limit before automating.",
+            "iam_change": "⚠️ This changes IAM permissions — review carefully before automating.",
+            "data_deletion": "🔴 This deletes data — never automate without a confirmation step.",
+            "cost_impact": "💰 This may incur AWS costs — verify pricing before automating.",
         }
-        label = safety_labels.get(safety_impact, f"⚠️ Safety consideration: {_e(safety_impact)}")
-        assessment_lines.append(label)
+        assessment_lines.append(safety_labels.get(safety_impact, f"⚠️ Safety note: {_e(safety_impact)}"))
 
     if assessment_lines:
         parts.append(
-            '<div style="background:#f5f5f5; border-left:3px solid #888; padding:8px 12px; margin:8px 0; border-radius:3px;">'
-            '<strong>Assessment:</strong><br>'
-            + '<br>'.join(assessment_lines)
+            '<div style="background:rgba(255,255,255,0.05); border-left:3px solid rgba(255,255,255,0.2); padding:10px 14px; margin:8px 0; border-radius:3px;">'
+            + '<br>'.join(f'<span style="color:rgba(255,255,255,0.75); font-size:0.88em;">{line}</span>' for line in assessment_lines)
             + '</div>'
         )
 
-    # --- Automate recommendation ---
+    # --- Recommendation ---
     if automate_recommended is not None:
         if automate_recommended == "yes":
-            parts.append('<p><strong>Recommendation:</strong> ✅ This step should be automated.</p>')
+            parts.append('<p style="color:#a5d6a7; font-size:0.9em;">✅ Recommendation: this step should be automated.</p>')
         else:
-            parts.append('<p><strong>Recommendation:</strong> ❌ Keep this step manual — automation is not recommended here.</p>')
+            parts.append('<p style="color:rgba(255,255,255,0.6); font-size:0.9em;">❌ Recommendation: keep this step manual — automation is not recommended here.</p>')
 
     # --- Human gate warning ---
     if payload.get("human_gate") == "required":
         parts.append(
-            '<p style="background:rgba(106,27,154,0.2); border-left:4px solid #ce93d8; '
-            'padding:8px 12px; color:#ce93d8; font-weight:bold;">'
-            "⚠️ Requires human approval before execution"
-            "</p>"
+            '<div style="background:rgba(106,27,154,0.2); border-left:4px solid #ce93d8; '
+            'padding:10px 14px; border-radius:4px; color:#ce93d8; font-weight:600;">'
+            "⚠️ Requires human approval before this can be executed"
+            "</div>"
         )
 
     # --- Rationale ---
     rationale = payload.get("rationale")
     if rationale is not None:
-        parts.append(f"<p><strong>Rationale:</strong> {_e(rationale)}</p>")
+        parts.append(f'<p style="color:rgba(255,255,255,0.65); font-size:0.88em; line-height:1.6;"><strong style="color:rgba(255,255,255,0.8);">Why flag this:</strong> {_e(rationale)}</p>')
 
     # --- Scope ---
     scope = payload.get("scope")
     if scope is not None:
-        parts.append(f"<p><strong>Scope:</strong> {_e(scope)}</p>")
+        parts.append(f'<p style="font-size:0.82em; color:rgba(255,255,255,0.4);">Scope: {_e(scope)}</p>')
 
-    # --- Static analysis caveat note ---
+    # --- Static analysis caveat ---
     parts.append(
-        '<p style="font-size:0.85em; color:#555; font-style:italic;">'
-        "Note: Gap detection is a static substring match — confirm in PR diff "
-        "before acting on this recommendation."
+        '<p style="font-size:0.8em; color:rgba(255,255,255,0.3); font-style:italic; margin-top:8px;">'
+        "Gap detection uses pattern matching — confirm in the PR diff before acting on this."
         "</p>"
     )
 
     inner = "\n".join(parts)
     return (
         "<details>"
-        "<summary style='cursor:pointer; color:#ce93d8;'>Automation Finding Details</summary>"
-        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.35); border-radius:0 0 8px 8px; border:1px solid rgba(255,255,255,0.08);">{inner}</div>'
+        "<summary style='cursor:pointer; color:rgba(255,255,255,0.5); font-size:0.85em; "
+        "padding:8px 0; user-select:none;'>▶ View automation details</summary>"
+        f'<div style="padding:14px 4px 4px 4px;">{inner}</div>'
         "</details>"
     )
 
@@ -684,8 +733,11 @@ def _format_description(description: str) -> str:
     def format_inline(text: str) -> str:
         """Format inline markdown: **bold**, `code`."""
         text = _e(text)
-        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
-        text = _re.sub(r'`([^`]+)`', r'<code style="background:#f0f0f0;padding:1px 3px;border-radius:2px;">\1</code>', text)
+        # Handle **word:** and **word** patterns — bold including trailing colon
+        text = _re.sub(r'\*\*([^*]+?)\*\*', r'<strong style="color:#fff;">\1</strong>', text)
+        # Strip any orphaned ** that weren't matched
+        text = text.replace('**', '')
+        text = _re.sub(r'`([^`]+)`', r'<code style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:#b0e0ff;font-size:0.9em;">\1</code>', text)
         return text
 
     def split_prose_into_bullets(text: str) -> str:
@@ -701,11 +753,17 @@ def _format_description(description: str) -> str:
         items = ''.join(f'<li style="margin:4px 0;">{format_inline(p.strip().rstrip(";."))}</li>' for p in parts if p.strip())
         return f'<ul style="margin:4px 0; padding-left:20px;">{items}</ul>'
 
+    # Section headers that introduce bullet-list content on subsequent lines
+    _BULLET_SECTION_HEADERS = {
+        'advantages', 'disadvantages', 'pros', 'cons', 'benefits', 'drawbacks',
+        'considerations', 'tradeoffs', 'trade-offs',
+    }
+
     lines = description.split('\n')
     html_parts: list[str] = []
     in_list = False
     list_type = None
-    current_section_is_prose = False
+    in_bullet_section = False  # True when inside Advantages/Disadvantages block
 
     def close_list():
         nonlocal in_list, list_type
@@ -718,26 +776,48 @@ def _format_description(description: str) -> str:
         stripped = line.strip()
         if not stripped:
             close_list()
-            current_section_is_prose = False
+            # Don't reset in_bullet_section on blank lines — items may be separated by blank lines
             continue
 
         # Section headers: "Advantages:", "Disadvantages:", "Proposed structure:", etc.
         header_match = _re.match(
-            r'^(Advantages|Disadvantages|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note)s?:\s*(.*)$',
+            r'^\*{0,2}(Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note|Considerations|Tradeoffs)s?\*{0,2}:\s*(.*)$',
             stripped, _re.IGNORECASE
         )
         if header_match:
             close_list()
-            label = header_match.group(1)
-            rest = header_match.group(2).strip()
-            html_parts.append(
-                f'<p style="margin:12px 0 4px 0; font-weight:bold; color:#333; '
-                f'border-bottom:1px solid #e0e0e0; padding-bottom:2px;">{_e(label)}:</p>'
-            )
+            label = header_match.group(1).title().replace('**', '').strip()
+            rest = header_match.group(2).strip().lstrip('*').strip()
+            # Use different styling for Proposed Structure vs Advantages/Disadvantages
+            is_bullet_section = label.lower() in _BULLET_SECTION_HEADERS
+            is_proposal = 'proposed' in label.lower()
+            if is_proposal:
+                html_parts.append(
+                    f'<p style="margin:16px 0 8px 0; font-weight:bold; color:#90c8ff; '
+                    f'border-bottom:1px solid rgba(100,160,255,0.25); padding-bottom:4px; font-size:1em;">📋 {_e(label)}:</p>'
+                )
+            else:
+                html_parts.append(
+                    f'<p style="margin:12px 0 4px 0; font-weight:bold; color:rgba(255,255,255,0.9); '
+                    f'border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:2px;">{_e(label)}:</p>'
+                )
+            in_bullet_section = is_bullet_section and not is_proposal
+            if not in_bullet_section:
+                # Entering a non-bullet section (Proposed Structure, Summary, etc.)
+                # — close any open bullet list
+                close_list()
             if rest:
-                # The rest after the header is prose — split into bullets
-                html_parts.append(split_prose_into_bullets(rest))
-            current_section_is_prose = True
+                if in_bullet_section:
+                    html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
+                    html_parts.append(f'<li style="margin:6px 0; line-height:1.6;">{format_inline(rest)}</li>')
+                    in_list = True
+                    list_type = 'ul'
+                else:
+                    html_parts.append(split_prose_into_bullets(rest))
+            elif in_bullet_section:
+                html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
+                in_list = True
+                list_type = 'ul'
             continue
 
         # Numbered list items: "(1) text" or "1. text"
@@ -749,7 +829,7 @@ def _format_description(description: str) -> str:
                 in_list = True
                 list_type = 'ol'
             html_parts.append(f'<li style="margin:4px 0;">{format_inline(num_match.group(2))}</li>')
-            current_section_is_prose = False
+            in_bullet_section = False
             continue
 
         # Bullet list items: "- text" or "* text"
@@ -760,8 +840,17 @@ def _format_description(description: str) -> str:
                 html_parts.append('<ul style="margin:4px 0; padding-left:20px;">')
                 in_list = True
                 list_type = 'ul'
-            html_parts.append(f'<li style="margin:4px 0;">{format_inline(bullet_match.group(1))}</li>')
-            current_section_is_prose = False
+            html_parts.append(f'<li style="margin:6px 0; line-height:1.6;">{format_inline(bullet_match.group(1))}</li>')
+            continue
+
+        # Inside an Advantages/Disadvantages section — each paragraph is a bullet
+        if in_bullet_section:
+            if not in_list or list_type != 'ul':
+                close_list()
+                html_parts.append('<ul style="margin:4px 0; padding-left:20px;">')
+                in_list = True
+                list_type = 'ul'
+            html_parts.append(f'<li style="margin:8px 0; line-height:1.7;">{format_inline(stripped)}</li>')
             continue
 
         # Long prose line — if it's long and has semicolons, split into bullets
@@ -769,8 +858,7 @@ def _format_description(description: str) -> str:
         if len(stripped) > 200 and '; ' in stripped:
             html_parts.append(split_prose_into_bullets(stripped))
         else:
-            html_parts.append(f'<p style="margin:6px 0;">{format_inline(stripped)}</p>')
-        current_section_is_prose = False
+            html_parts.append(f'<p style="margin:6px 0; line-height:1.6;">{format_inline(stripped)}</p>')
 
     close_list()
     return '\n'.join(html_parts)
@@ -780,10 +868,59 @@ def _render_general_finding_detail(finding: Finding) -> str:
     """Render a ``<details>`` panel for non-currency/automation findings."""
     parts: list[str] = []
 
-    # --- Description (the main content) ---
+    # --- Description — split into intro + structured sections for readability ---
     description = finding.description
     if description:
-        parts.append(f'<div style="margin-bottom:8px;">{_format_description(description)}</div>')
+        import re as _re_desc
+        import json as _json_desc
+        # Decode JSON escape sequences
+        try:
+            if '\\n' in description or '\\u' in description:
+                description = _json_desc.loads(f'"{description}"')
+        except Exception:
+            pass
+
+        # Split the description at the first section header (Advantages:, Disadvantages:, etc.)
+        # Everything before it is the "What's being proposed" intro
+        # Handles both plain "Advantages:" and bold "**Advantages:**" markdown
+        section_split = _re_desc.split(
+            r'(?=\*{0,2}(?:Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Considerations|Tradeoffs)s?\*{0,2}:)',
+            description, maxsplit=1
+        )
+        intro = section_split[0].strip()
+        rest = section_split[1].strip() if len(section_split) > 1 else ''
+        # Strip any leading ** left over from bold markdown headers like **Advantages:**
+        rest = rest.lstrip('*').strip()
+
+        # Reorder: put Proposed Structure before Advantages/Disadvantages
+        if rest:
+            # Find Proposed Structure section if it exists
+            prop_match = _re_desc.search(
+                r'\*{0,2}Proposed\s+[Ss]tructure\*{0,2}:',
+                rest
+            )
+            adv_match = _re_desc.search(
+                r'\*{0,2}(?:Advantages|Disadvantages)\*{0,2}:',
+                rest
+            )
+            if prop_match and adv_match and prop_match.start() > adv_match.start():
+                # Proposed Structure comes after Advantages — move it to the front
+                prop_start = prop_match.start()
+                proposed_section = rest[prop_start:]
+                adv_section = rest[:prop_start].strip()
+                rest = proposed_section + '\n\n' + adv_section
+
+        if intro:
+            parts.append(
+                '<div style="background:rgba(100,160,255,0.08); border-left:3px solid rgba(100,160,255,0.4); '
+                'padding:12px 16px; border-radius:0 8px 8px 0; margin-bottom:12px;">'
+                '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; '
+                'color:rgba(100,160,255,0.7); margin-bottom:8px;">What\'s being proposed</div>'
+                f'<div style="color:rgba(255,255,255,0.85); font-size:0.9em; line-height:1.7;">{_format_description(intro)}</div>'
+                '</div>'
+            )
+        if rest:
+            parts.append(f'<div style="margin-top:4px;">{_format_description(rest)}</div>')
 
     # --- Dispute reason (shown prominently when disputed) ---
     review_status = finding.review_status
@@ -800,16 +937,16 @@ def _render_general_finding_detail(finding: Finding) -> str:
         except Exception:
             pass
         parts.append(
-            '<div style="background:#ffebee; border-left:4px solid #c62828; '
+            '<div style="background:rgba(198,40,40,0.15); border-left:4px solid #ef5350; '
             'padding:10px 14px; margin:8px 0; border-radius:4px;">'
-            '<strong style="color:#c62828;">⛔ Disputed by review agent</strong><br>'
-            f'<span style="color:#555; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
+            '<strong style="color:#ef9a9a;">⛔ Disputed by review agent</strong><br>'
+            f'<span style="color:rgba(255,255,255,0.75); font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
             '</div>'
         )
         if primary_reasoning and review_notes and primary_reasoning != review_notes:
             parts.append(
-                '<details><summary style="cursor:pointer; color:#555;">Primary agent reasoning</summary>'
-                f'<p style="font-size:0.9em; white-space:pre-wrap;">{_e(primary_reasoning)}</p>'
+                '<details><summary style="cursor:pointer; color:rgba(255,255,255,0.5);">Primary agent reasoning</summary>'
+                f'<p style="font-size:0.9em; white-space:pre-wrap; color:rgba(255,255,255,0.7);">{_e(primary_reasoning)}</p>'
                 '</details>'
             )
 
@@ -826,8 +963,8 @@ def _render_general_finding_detail(finding: Finding) -> str:
     impact = impact_map.get(category, "")
     if impact:
         parts.append(
-            '<div style="background:#fff8e1; border-left:3px solid #f9a825; padding:6px 10px; margin:6px 0; border-radius:3px;">'
-            f'<strong>⚠️ Impact if unresolved:</strong> {impact}'
+            '<div style="background:rgba(249,168,37,0.12); border-left:3px solid #f9a825; padding:8px 12px; margin:6px 0; border-radius:3px;">'
+            f'<strong style="color:#ffb74d;">⚠️ Impact if unresolved:</strong> <span style="color:rgba(255,255,255,0.75);">{impact}</span>'
             '</div>'
         )
 
@@ -853,9 +990,9 @@ def _render_general_finding_detail(finding: Finding) -> str:
                     f' <a href="#" onclick="document.getElementById(\'more-{hash(file_path)}\').style.display=\'inline\';this.style.display=\'none\';return false;" style="font-size:0.85em;">[show more]</a>'
                 )
             parts.append(
-                f'<div style="margin:6px 0; padding:8px 10px; background:#f5f5f5; border-radius:4px; border-left:3px solid #1565c0;">'
-                f'<div style="margin-bottom:4px;">{change_html}</div>'
-                f'<div style="font-size:0.8em; color:#666; font-family:monospace;">{_e(file_path)}</div>'
+                f'<div style="margin:6px 0; padding:8px 10px; background:rgba(255,255,255,0.06); border-radius:4px; border-left:3px solid #5c9aff;">'
+                f'<div style="margin-bottom:4px; color:rgba(255,255,255,0.85); font-size:0.88em; line-height:1.6;">{change_html}</div>'
+                f'<div style="font-size:0.78em; color:rgba(255,255,255,0.4); font-family:monospace;">{_e(file_path)}</div>'
                 f'</div>'
             )
 
@@ -1350,7 +1487,78 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             except Exception:
                 formatted_date = raw_date[:10] if raw_date else ''
 
-            # Status with color
+            # Clean up the title for display:
+            # Automation titles like "Automation gap: copy_paste in some/long/path.md"
+            # are redundant since the file path is already in Affected Files.
+            # Strip the filename suffix and translate action_type to plain English.
+            _action_type_plain = {
+                "copy_paste": "copy and paste step",
+                "console_navigation": "manual console step",
+                "cli_command": "CLI command step",
+                "api_call": "API call step",
+                "config_change": "configuration change",
+                "iam_policy": "IAM permissions change",
+                "quota_request": "quota increase request",
+                "manual_approval": "manual approval step",
+                "file_edit": "file edit step",
+            }
+            display_title = f.get('title', '')
+            schema = f.get('finding_schema_version', '')
+            _claim_type_plain = {
+                "feature_availability": "Feature availability",
+                "service_name": "Service name",
+                "region_count": "Region count",
+                "region_list": "Region list",
+                "price": "Price",
+                "model_id": "Model ID",
+                "eol_date": "End-of-life date",
+                "quota_limit": "Quota limit",
+                "service_limit": "Service limit",
+                "preview_status": "Preview / GA status",
+                "other_factual": "Factual claim",
+            }
+            if schema and schema.startswith('currency/'):
+                import re as _re_title
+                payload_data = f.get('auditor_payload') or {}
+                claim_text = payload_data.get('claim_text', '')
+                claim_type = payload_data.get('claim_type', '')
+                # Translate claim_type to plain English
+                plain_type = _claim_type_plain.get(claim_type, claim_type.replace('_', ' ').title() if claim_type else '')
+                # Strip everything from " in filename.md" to end (handles multi-word claim types)
+                display_title = _re_title.sub(r'\s+in\s+\S+$', '', display_title)
+                # Replace "Currency drift: <anything>" with "Stale claim: <plain_type>"
+                display_title = _re_title.sub(r'^Currency drift:.*$', f'Stale claim: {plain_type}', display_title)
+                # Append the actual claim text — no truncation, let the column wrap
+                if claim_text:
+                    display_title = f'{display_title} — "{claim_text}"'
+            elif schema and schema.startswith('automation/'):
+                import re as _re_title
+                # Strip " in path/to/file.md" suffix
+                display_title = _re_title.sub(r'\s+in\s+\S+\.md$', '', display_title)
+                # Translate action_type slug in title (e.g. "copy_paste" → "copy and paste step")
+                for slug, plain in _action_type_plain.items():
+                    display_title = display_title.replace(slug, plain)
+                # Clean up any remaining underscores
+                display_title = display_title.replace('_', ' ')
+                # Append the action_text so the user knows what specific step is being flagged
+                action_text = (f.get('auditor_payload') or {}).get('action_text', '')
+                if action_text:
+                    short_action = action_text[:80] + ('…' if len(action_text) > 80 else '')
+                    display_title = f'{display_title} — {short_action}'
+
+            # Build a context-aware tooltip for the "Not yet reviewed" badge
+            _risk = f.get('risk_level', '')
+            _schema = f.get('finding_schema_version', '') or ''
+            if _schema.startswith('automation/'):
+                _review_tooltip = "Automation findings are never sent to the review agent — this is expected."
+            elif _schema.startswith('currency/') and _risk in ('medium', 'high'):
+                _review_tooltip = "This is a medium/high risk currency finding that should have been reviewed. The review agent may have skipped it or the scan timed out before completing the review step."
+            elif _schema.startswith('currency/') and _risk == 'low':
+                _review_tooltip = "Low risk currency findings are not sent to the review agent — this is expected."
+            elif not _schema:
+                _review_tooltip = "Analysis Agent and Refactoring Agent findings are not sent to the review agent — this is expected."
+            else:
+                _review_tooltip = "The second AI reviewer has not checked this finding yet."
             status_val = f.get('status', 'pending')
             status_colors = {
                 "pending": "#b0bec5",
@@ -1363,9 +1571,9 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             table_rows += f"""
             <tr>
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
-                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="The second AI reviewer has not checked this finding yet">🔍 Not yet reviewed</span>'}</td>
-                <td>{_e(f['title'])}</td>
-                <td style="font-size:0.8em; color:#b0bec5;">{_e(', '.join(f['affected_files']))}</td>
+                <td>{review_badge if review_badge else f'<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="{_e(_review_tooltip)}">🔍 Not yet reviewed</span>'}</td>
+                <td>{_e(display_title)}</td>
+                <td style="font-size:0.8em; color:#b0bec5; vertical-align:top;">{'<ul style="margin:0; padding-left:14px; list-style:disc;">' + ''.join(f'<li style="margin:2px 0;">{_e(fp)}</li>' for fp in f['affected_files']) + '</ul>' if len(f['affected_files']) > 1 else _e(', '.join(f['affected_files']))}</td>
                 <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>
                 <td>{status_html}</td>
                 <td>{badges_html}</td>
