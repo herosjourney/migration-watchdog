@@ -506,74 +506,104 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
 def _render_automation_payload(payload: dict, finding: Finding) -> str:
     """Render a ``<details>`` panel for an automation/1.0 finding.
 
-    Shows action text, action type, gap type + confidence + reason,
-    gap detail narrative, CLI equivalent as a code block, reference URL,
-    placeholder list, judgment inputs, automate recommendation, human gate
-    warning, rationale, scope, and a static-analysis caveat note.
-
-    All user-derived values are escaped with ``_e()``.
+    Uses plain-English labels throughout — no internal field names shown to users.
     """
     parts: list[str] = []
 
-    # --- Action text ---
+    # --- Plain-English translations for technical values ---
+    _action_type_labels = {
+        "console_navigation": "Manual console step — user must navigate the AWS console",
+        "cli_command": "CLI command — can be run from the terminal",
+        "api_call": "API call — can be automated via code",
+        "config_change": "Configuration change",
+        "iam_policy": "IAM / permissions change",
+        "quota_request": "Service quota increase request",
+        "manual_approval": "Requires manual approval",
+        "file_edit": "File or configuration edit",
+    }
+    _gap_type_labels = {
+        "full_gap": "🔴 Not automated — no script exists for this step yet",
+        "partial_gap": "🟡 Partially automated — a script exists but doesn't cover this step",
+        "no_gap": "✅ Already automated — the generated script handles this",
+    }
+    _gap_reason_labels = {
+        "missing_generated_artifact": "The setup script for this step hasn't been generated yet",
+        "cli_not_in_script": "An AWS CLI command exists for this but isn't in the script",
+        "no_cli_equivalent": "No AWS CLI command exists for this action",
+        "human_decision_required": "This step requires a human decision before it can run",
+        "not_automatable": "This type of action can't be automated",
+        "partial_coverage": "The script covers part of this but not all of it",
+    }
+    _confidence_labels = {
+        "high": "high confidence",
+        "medium": "medium confidence",
+        "low": "low confidence — verify manually",
+    }
+
+    # --- Manual action (the step the plugin tells users to do) ---
     action_text = payload.get("action_text")
     if action_text is not None:
         parts.append(
-            f"<p><strong>Manual action:</strong> &ldquo;{_e(action_text)}&rdquo;</p>"
+            f'<div style="background:rgba(255,255,255,0.05); border-radius:8px; padding:12px 16px; margin-bottom:4px;">'
+            f'<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; color:rgba(255,255,255,0.4); margin-bottom:6px;">What the plugin tells users to do manually</div>'
+            f'<div style="color:#fff; font-style:italic; line-height:1.6;">&ldquo;{_e(action_text)}&rdquo;</div>'
+            f'</div>'
         )
 
-    # --- Action type ---
+    # --- Action type (translated) ---
     action_type = payload.get("action_type")
     if action_type is not None:
-        parts.append(f"<p><strong>Action type:</strong> {_e(action_type)}</p>")
+        label = _action_type_labels.get(action_type, action_type.replace("_", " ").title())
+        parts.append(f'<p style="color:rgba(255,255,255,0.65); font-size:0.88em;">📋 {_e(label)}</p>')
 
-    # --- Gap type + confidence + reason (when reason is not None) ---
+    # --- Gap status (translated) ---
     gap_type = payload.get("gap_type")
     confidence = payload.get("confidence")
     reason = payload.get("reason")
     if gap_type is not None:
-        gap_str = _e(gap_type)
-        if confidence is not None:
-            gap_str += f" ({_e(confidence)} confidence)"
-        parts.append(f"<p><strong>Gap:</strong> {gap_str}</p>")
+        gap_label = _gap_type_labels.get(gap_type, gap_type.replace("_", " ").title())
+        conf_label = _confidence_labels.get(confidence, "") if confidence else ""
+        conf_suffix = f' <span style="color:rgba(255,255,255,0.4); font-size:0.85em;">({conf_label})</span>' if conf_label else ""
+        parts.append(f'<p style="font-size:0.92em;">{gap_label}{conf_suffix}</p>')
     if reason is not None:
-        parts.append(f"<p><strong>Gap reason:</strong> {_e(reason)}</p>")
+        reason_label = _gap_reason_labels.get(reason, reason.replace("_", " ").capitalize())
+        parts.append(f'<p style="color:rgba(255,255,255,0.6); font-size:0.85em;">Why: {_e(reason_label)}</p>')
 
-    # --- Gap detail / partial_gap_narrative ---
+    # --- Gap detail narrative ---
     partial_gap_narrative = payload.get("partial_gap_narrative")
     if partial_gap_narrative is not None:
-        parts.append(
-            f"<p><strong>Gap detail:</strong> {_e(partial_gap_narrative)}</p>"
-        )
+        parts.append(f'<p style="color:rgba(255,255,255,0.7); font-size:0.88em; line-height:1.6;">{_e(partial_gap_narrative)}</p>')
 
-    # --- CLI equivalent as <pre><code> block ---
+    # --- CLI equivalent ---
     cli_equivalent = payload.get("cli_equivalent")
     if cli_equivalent is not None:
         parts.append(
-            f"<p><strong>CLI equivalent:</strong></p>"
-            f"<pre><code>{_e(cli_equivalent)}</code></pre>"
+            '<div style="margin:8px 0;">'
+            '<div style="font-size:0.78em; color:rgba(255,255,255,0.45); margin-bottom:4px;">AWS CLI command that could automate this</div>'
+            f'<pre style="background:rgba(0,0,0,0.4); padding:10px 14px; border-radius:6px; overflow-x:auto; margin:0;"><code style="color:#b0e0ff; font-size:0.88em;">{_e(cli_equivalent)}</code></pre>'
+            '</div>'
         )
     else:
         cli_note = payload.get("cli_note")
         if cli_note is not None:
-            parts.append(
-                f"<p><strong>CLI equivalent:</strong> <em>{_e(cli_note)}</em></p>"
-            )
+            parts.append(f'<p style="color:rgba(255,255,255,0.6); font-size:0.88em;"><em>{_e(cli_note)}</em></p>')
 
-    # --- Reference URL as clickable link ---
+    # --- Reference URL ---
     reference_url = payload.get("reference_url")
     if reference_url is not None:
         parts.append(
-            f'<p><strong>Reference:</strong> '
-            f'<a href="{_e(reference_url)}" target="_blank">{_e(reference_url)}</a></p>'
+            f'<p style="font-size:0.85em;"><span style="color:rgba(255,255,255,0.4);">Reference: </span>'
+            f'<a href="{_e(reference_url)}" target="_blank" style="color:#90c8ff;">{_e(reference_url[:80])}{"…" if len(reference_url) > 80 else ""}</a></p>'
         )
 
-    # --- Placeholder list (comma-separated) ---
+    # --- Placeholders (translated) ---
     placeholder_list = payload.get("placeholder_list")
     if placeholder_list and isinstance(placeholder_list, list):
-        escaped_placeholders = ", ".join(_e(str(p)) for p in placeholder_list)
         parts.append(
-            f"<p><strong>Placeholders:</strong> {escaped_placeholders}</p>"
+            '<p style="font-size:0.85em; color:rgba(255,255,255,0.55);">'
+            '📝 Values you\'ll need to fill in: '
+            + ', '.join(f'<code style="background:rgba(255,255,255,0.1); padding:1px 5px; border-radius:3px; color:#b0e0ff;">{_e(str(p))}</code>' for p in placeholder_list)
+            + '</p>'
         )
 
     # --- Plain-English assessment ---
@@ -585,75 +615,70 @@ def _render_automation_payload(payload: dict, finding: Finding) -> str:
 
     assessment_lines = []
     if judgment_required is True:
-        assessment_lines.append("⚠️ Requires human judgment before executing — values or decisions can't be determined automatically.")
+        assessment_lines.append("⚠️ A human needs to make a decision before this can run — it can't be fully automated.")
     elif judgment_required is False:
-        assessment_lines.append("✅ No human judgment needed — this step can be fully automated.")
-
+        assessment_lines.append("✅ No human decision needed — this step can be fully automated.")
     if repeated_operation is True:
-        assessment_lines.append("🔁 This is a repeated operation — automating it would save significant time across multiple runs.")
-    
+        assessment_lines.append("🔁 This step runs repeatedly — automating it would save significant time.")
     if values_precomputed is False and judgment_required is False:
-        assessment_lines.append("📋 Input values need to be looked up or calculated before running the CLI command.")
+        assessment_lines.append("📋 Some input values need to be looked up before running the CLI command.")
     elif values_precomputed is True:
-        assessment_lines.append("✅ All required input values are already available.")
-
+        assessment_lines.append("✅ All required values are already known.")
     if safety_impact:
         safety_labels = {
-            "quota_increase": "⚠️ Safety consideration: this action increases a service quota — review limits before automating.",
-            "iam_change": "⚠️ Safety consideration: this action modifies IAM permissions — requires careful review.",
-            "data_deletion": "🔴 Safety consideration: this action deletes data — should never be automated without confirmation.",
-            "cost_impact": "💰 Safety consideration: this action may incur costs — verify pricing before automating.",
+            "quota_increase": "⚠️ This increases a service quota — review the new limit before automating.",
+            "iam_change": "⚠️ This changes IAM permissions — review carefully before automating.",
+            "data_deletion": "🔴 This deletes data — never automate without a confirmation step.",
+            "cost_impact": "💰 This may incur AWS costs — verify pricing before automating.",
         }
-        label = safety_labels.get(safety_impact, f"⚠️ Safety consideration: {_e(safety_impact)}")
-        assessment_lines.append(label)
+        assessment_lines.append(safety_labels.get(safety_impact, f"⚠️ Safety note: {_e(safety_impact)}"))
 
     if assessment_lines:
         parts.append(
-            '<div style="background:#f5f5f5; border-left:3px solid #888; padding:8px 12px; margin:8px 0; border-radius:3px;">'
-            '<strong>Assessment:</strong><br>'
-            + '<br>'.join(assessment_lines)
+            '<div style="background:rgba(255,255,255,0.05); border-left:3px solid rgba(255,255,255,0.2); padding:10px 14px; margin:8px 0; border-radius:3px;">'
+            + '<br>'.join(f'<span style="color:rgba(255,255,255,0.75); font-size:0.88em;">{line}</span>' for line in assessment_lines)
             + '</div>'
         )
 
-    # --- Automate recommendation ---
+    # --- Recommendation ---
     if automate_recommended is not None:
         if automate_recommended == "yes":
-            parts.append('<p><strong>Recommendation:</strong> ✅ This step should be automated.</p>')
+            parts.append('<p style="color:#a5d6a7; font-size:0.9em;">✅ Recommendation: this step should be automated.</p>')
         else:
-            parts.append('<p><strong>Recommendation:</strong> ❌ Keep this step manual — automation is not recommended here.</p>')
+            parts.append('<p style="color:rgba(255,255,255,0.6); font-size:0.9em;">❌ Recommendation: keep this step manual — automation is not recommended here.</p>')
 
     # --- Human gate warning ---
     if payload.get("human_gate") == "required":
         parts.append(
-            '<p style="background:rgba(106,27,154,0.2); border-left:4px solid #ce93d8; '
-            'padding:8px 12px; color:#ce93d8; font-weight:bold;">'
-            "⚠️ Requires human approval before execution"
-            "</p>"
+            '<div style="background:rgba(106,27,154,0.2); border-left:4px solid #ce93d8; '
+            'padding:10px 14px; border-radius:4px; color:#ce93d8; font-weight:600;">'
+            "⚠️ Requires human approval before this can be executed"
+            "</div>"
         )
 
     # --- Rationale ---
     rationale = payload.get("rationale")
     if rationale is not None:
-        parts.append(f"<p><strong>Rationale:</strong> {_e(rationale)}</p>")
+        parts.append(f'<p style="color:rgba(255,255,255,0.65); font-size:0.88em; line-height:1.6;"><strong style="color:rgba(255,255,255,0.8);">Why flag this:</strong> {_e(rationale)}</p>')
 
     # --- Scope ---
     scope = payload.get("scope")
     if scope is not None:
-        parts.append(f"<p><strong>Scope:</strong> {_e(scope)}</p>")
+        parts.append(f'<p style="font-size:0.82em; color:rgba(255,255,255,0.4);">Scope: {_e(scope)}</p>')
 
-    # --- Static analysis caveat note ---
+    # --- Static analysis caveat ---
     parts.append(
-        '<p style="font-size:0.85em; color:#555; font-style:italic;">'
-        "Note: Gap detection is a static substring match — confirm in PR diff "
-        "before acting on this recommendation."
+        '<p style="font-size:0.8em; color:rgba(255,255,255,0.3); font-style:italic; margin-top:8px;">'
+        "Gap detection uses pattern matching — confirm in the PR diff before acting on this."
         "</p>"
     )
 
     inner = "\n".join(parts)
     return (
         "<details>"
-        "<summary style='cursor:pointer; color:#ce93d8;'>Automation Finding Details</summary>"
-        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.35); border-radius:0 0 8px 8px; border:1px solid rgba(255,255,255,0.08);">{inner}</div>'
+        "<summary style='cursor:pointer; color:rgba(255,255,255,0.5); font-size:0.85em; "
+        "padding:8px 0; user-select:none;'>▶ View automation details</summary>"
+        f'<div style="padding:14px 4px 4px 4px;">{inner}</div>'
         "</details>"
     )
 
