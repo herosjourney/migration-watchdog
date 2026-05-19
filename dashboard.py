@@ -1544,7 +1544,19 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 action_text = (f.get('auditor_payload') or {}).get('action_text', '')
                 if action_text:
                     short_action = action_text[:80] + ('…' if len(action_text) > 80 else '')
-                    display_title = f'{display_title} — {short_action}'            # Status with color
+                    display_title = f'{display_title} — {short_action}'            # Build a context-aware tooltip for the "Not yet reviewed" badge
+            _risk = f.get('risk_level', '')
+            _schema = f.get('finding_schema_version', '') or ''
+            if _schema.startswith('automation/'):
+                _review_tooltip = "Automation findings are never sent to the review agent — this is expected."
+            elif _schema.startswith('currency/') and _risk in ('medium', 'high'):
+                _review_tooltip = "This is a medium/high risk currency finding that should have been reviewed. The review agent may have skipped it or the scan timed out before completing the review step."
+            elif _schema.startswith('currency/') and _risk == 'low':
+                _review_tooltip = "Low risk currency findings are not sent to the review agent — this is expected."
+            elif not _schema:
+                _review_tooltip = "Analysis Agent and Refactoring Agent findings are not sent to the review agent — this is expected."
+            else:
+                _review_tooltip = "The second AI reviewer has not checked this finding yet."
             status_val = f.get('status', 'pending')
             status_colors = {
                 "pending": "#b0bec5",
@@ -1557,7 +1569,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             table_rows += f"""
             <tr>
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
-                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="The second AI reviewer has not checked this finding yet">🔍 Not yet reviewed</span>'}</td>
+                <td>{review_badge if review_badge else f'<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="{_e(_review_tooltip)}">🔍 Not yet reviewed</span>'}</td>
                 <td>{_e(display_title)}</td>
                 <td style="font-size:0.8em; color:#b0bec5; vertical-align:top;">{'<ul style="margin:0; padding-left:14px; list-style:disc;">' + ''.join(f'<li style="margin:2px 0;">{_e(fp)}</li>' for fp in f['affected_files']) + '</ul>' if len(f['affected_files']) > 1 else _e(', '.join(f['affected_files']))}</td>
                 <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>
