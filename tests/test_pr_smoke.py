@@ -237,8 +237,7 @@ class TestPRModeSmoke:
             for app_var in ("GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_INSTALLATION_ID"):
                 os.environ.pop(app_var, None)
 
-            with patch.object(_main_module, "SourceFetcher") as mock_sf_cls, \
-                 patch.object(_main_module, "boto3") as mock_boto3, \
+            with patch.object(_main_module, "boto3") as mock_boto3, \
                  patch.object(_main_module, "httpx") as mock_httpx:
                 # Mock httpx.AsyncClient for the PR comment posting path
                 mock_client = AsyncMock()
@@ -250,10 +249,9 @@ class TestPRModeSmoke:
                 # Mock boto3.resource for DynamoDB
                 mock_boto3.resource = MagicMock()
 
-                # Mock SourceFetcher with async fetch_all_sources
-                mock_sf = AsyncMock()
-                mock_sf.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
-                mock_sf_cls.return_value = mock_sf
+                # SourceFetcher is already stubbed at module level via sys.modules.
+                # Ensure the stub instance has an awaitable fetch_all_sources.
+                _mock_fetcher.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
 
                 asyncio.run(_main_module.run_scan())
 
