@@ -726,11 +726,17 @@ def _format_description(description: str) -> str:
         items = ''.join(f'<li style="margin:4px 0;">{format_inline(p.strip().rstrip(";."))}</li>' for p in parts if p.strip())
         return f'<ul style="margin:4px 0; padding-left:20px;">{items}</ul>'
 
+    # Section headers that introduce bullet-list content on subsequent lines
+    _BULLET_SECTION_HEADERS = {
+        'advantages', 'disadvantages', 'pros', 'cons', 'benefits', 'drawbacks',
+        'considerations', 'tradeoffs', 'trade-offs',
+    }
+
     lines = description.split('\n')
     html_parts: list[str] = []
     in_list = False
     list_type = None
-    current_section_is_prose = False
+    in_bullet_section = False  # True when inside Advantages/Disadvantages block
 
     def close_list():
         nonlocal in_list, list_type
@@ -743,12 +749,12 @@ def _format_description(description: str) -> str:
         stripped = line.strip()
         if not stripped:
             close_list()
-            current_section_is_prose = False
+            in_bullet_section = False
             continue
 
         # Section headers: "Advantages:", "Disadvantages:", "Proposed structure:", etc.
         header_match = _re.match(
-            r'^(Advantages|Disadvantages|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note)s?:\s*(.*)$',
+            r'^(Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note|Considerations|Tradeoffs)s?:\s*(.*)$',
             stripped, _re.IGNORECASE
         )
         if header_match:
@@ -759,10 +765,21 @@ def _format_description(description: str) -> str:
                 f'<p style="margin:12px 0 4px 0; font-weight:bold; color:rgba(255,255,255,0.9); '
                 f'border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:2px;">{_e(label)}:</p>'
             )
+            # Mark that subsequent lines should be treated as bullet items
+            in_bullet_section = label.lower() in _BULLET_SECTION_HEADERS
             if rest:
-                # The rest after the header is prose — split into bullets
-                html_parts.append(split_prose_into_bullets(rest))
-            current_section_is_prose = True
+                if in_bullet_section:
+                    html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
+                    html_parts.append(f'<li style="margin:6px 0; line-height:1.6;">{format_inline(rest)}</li>')
+                    in_list = True
+                    list_type = 'ul'
+                else:
+                    html_parts.append(split_prose_into_bullets(rest))
+            elif in_bullet_section:
+                # Open the list — items will follow on subsequent lines
+                html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
+                in_list = True
+                list_type = 'ul'
             continue
 
         # Numbered list items: "(1) text" or "1. text"
@@ -774,7 +791,7 @@ def _format_description(description: str) -> str:
                 in_list = True
                 list_type = 'ol'
             html_parts.append(f'<li style="margin:4px 0;">{format_inline(num_match.group(2))}</li>')
-            current_section_is_prose = False
+            in_bullet_section = False
             continue
 
         # Bullet list items: "- text" or "* text"
@@ -785,8 +802,17 @@ def _format_description(description: str) -> str:
                 html_parts.append('<ul style="margin:4px 0; padding-left:20px;">')
                 in_list = True
                 list_type = 'ul'
-            html_parts.append(f'<li style="margin:4px 0;">{format_inline(bullet_match.group(1))}</li>')
-            current_section_is_prose = False
+            html_parts.append(f'<li style="margin:6px 0; line-height:1.6;">{format_inline(bullet_match.group(1))}</li>')
+            continue
+
+        # Inside an Advantages/Disadvantages section — each paragraph is a bullet
+        if in_bullet_section:
+            if not in_list or list_type != 'ul':
+                close_list()
+                html_parts.append('<ul style="margin:4px 0; padding-left:20px;">')
+                in_list = True
+                list_type = 'ul'
+            html_parts.append(f'<li style="margin:8px 0; line-height:1.7;">{format_inline(stripped)}</li>')
             continue
 
         # Long prose line — if it's long and has semicolons, split into bullets
@@ -794,8 +820,7 @@ def _format_description(description: str) -> str:
         if len(stripped) > 200 and '; ' in stripped:
             html_parts.append(split_prose_into_bullets(stripped))
         else:
-            html_parts.append(f'<p style="margin:6px 0;">{format_inline(stripped)}</p>')
-        current_section_is_prose = False
+            html_parts.append(f'<p style="margin:6px 0; line-height:1.6;">{format_inline(stripped)}</p>')
 
     close_list()
     return '\n'.join(html_parts)
