@@ -1084,10 +1084,11 @@ def _render_partial_data_warning(scan_run: ScanRun | None) -> str:
     if scan_run is None or not scan_run.partial_data_warning:
         return ""
     return (
-        '<div style="background:#fff3e0; border-left:4px solid #e65100; '
-        'padding:8px 12px; margin:8px 0;">'
-        "⚠️ Partial data warning: some source fetches failed during this scan run. "
-        "Some findings may be incomplete."
+        '<div style="background:rgba(230,81,0,0.2); border-left:4px solid #ff6d00; '
+        'padding:10px 14px; margin:8px 0; border-radius:4px;">'
+        '<span style="color:#ffcc80; font-weight:600;">⚠️ Partial data warning:</span> '
+        '<span style="color:rgba(255,255,255,0.85);">some source fetches failed during this scan run. '
+        'Some findings may be incomplete.</span>'
         "</div>"
     )
 
@@ -1544,7 +1545,9 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 action_text = (f.get('auditor_payload') or {}).get('action_text', '')
                 if action_text:
                     short_action = action_text[:80] + ('…' if len(action_text) > 80 else '')
-                    display_title = f'{display_title} — {short_action}'            # Build a context-aware tooltip for the "Not yet reviewed" badge
+                    display_title = f'{display_title} — {short_action}'
+
+            # Build a context-aware tooltip for the "Not yet reviewed" badge
             _risk = f.get('risk_level', '')
             _schema = f.get('finding_schema_version', '') or ''
             if _schema.startswith('automation/'):
