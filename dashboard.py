@@ -684,8 +684,8 @@ def _format_description(description: str) -> str:
     def format_inline(text: str) -> str:
         """Format inline markdown: **bold**, `code`."""
         text = _e(text)
-        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
-        text = _re.sub(r'`([^`]+)`', r'<code style="background:#f0f0f0;padding:1px 3px;border-radius:2px;">\1</code>', text)
+        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong style="color:#fff;">\1</strong>', text)
+        text = _re.sub(r'`([^`]+)`', r'<code style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:#b0e0ff;font-size:0.9em;">\1</code>', text)
         return text
 
     def split_prose_into_bullets(text: str) -> str:
@@ -731,8 +731,8 @@ def _format_description(description: str) -> str:
             label = header_match.group(1)
             rest = header_match.group(2).strip()
             html_parts.append(
-                f'<p style="margin:12px 0 4px 0; font-weight:bold; color:#333; '
-                f'border-bottom:1px solid #e0e0e0; padding-bottom:2px;">{_e(label)}:</p>'
+                f'<p style="margin:12px 0 4px 0; font-weight:bold; color:rgba(255,255,255,0.9); '
+                f'border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:2px;">{_e(label)}:</p>'
             )
             if rest:
                 # The rest after the header is prose — split into bullets
@@ -800,16 +800,16 @@ def _render_general_finding_detail(finding: Finding) -> str:
         except Exception:
             pass
         parts.append(
-            '<div style="background:#ffebee; border-left:4px solid #c62828; '
+            '<div style="background:rgba(198,40,40,0.15); border-left:4px solid #ef5350; '
             'padding:10px 14px; margin:8px 0; border-radius:4px;">'
-            '<strong style="color:#c62828;">⛔ Disputed by review agent</strong><br>'
-            f'<span style="color:#555; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
+            '<strong style="color:#ef9a9a;">⛔ Disputed by review agent</strong><br>'
+            f'<span style="color:rgba(255,255,255,0.75); font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
             '</div>'
         )
         if primary_reasoning and review_notes and primary_reasoning != review_notes:
             parts.append(
-                '<details><summary style="cursor:pointer; color:#555;">Primary agent reasoning</summary>'
-                f'<p style="font-size:0.9em; white-space:pre-wrap;">{_e(primary_reasoning)}</p>'
+                '<details><summary style="cursor:pointer; color:rgba(255,255,255,0.5);">Primary agent reasoning</summary>'
+                f'<p style="font-size:0.9em; white-space:pre-wrap; color:rgba(255,255,255,0.7);">{_e(primary_reasoning)}</p>'
                 '</details>'
             )
 
@@ -853,9 +853,9 @@ def _render_general_finding_detail(finding: Finding) -> str:
                     f' <a href="#" onclick="document.getElementById(\'more-{hash(file_path)}\').style.display=\'inline\';this.style.display=\'none\';return false;" style="font-size:0.85em;">[show more]</a>'
                 )
             parts.append(
-                f'<div style="margin:6px 0; padding:8px 10px; background:#f5f5f5; border-radius:4px; border-left:3px solid #1565c0;">'
-                f'<div style="margin-bottom:4px;">{change_html}</div>'
-                f'<div style="font-size:0.8em; color:#666; font-family:monospace;">{_e(file_path)}</div>'
+                f'<div style="margin:6px 0; padding:8px 10px; background:rgba(255,255,255,0.06); border-radius:4px; border-left:3px solid #5c9aff;">'
+                f'<div style="margin-bottom:4px; color:rgba(255,255,255,0.85); font-size:0.88em; line-height:1.6;">{change_html}</div>'
+                f'<div style="font-size:0.78em; color:rgba(255,255,255,0.4); font-family:monospace;">{_e(file_path)}</div>'
                 f'</div>'
             )
 
