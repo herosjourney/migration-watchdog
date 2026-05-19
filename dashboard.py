@@ -276,6 +276,26 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
         if issue_type:
             parts.append(f'<span style="color:#ef9a9a; font-size:0.82em;">🔒 {_e(issue_type)}</span>')
 
+    else:
+        # Analysis Agent / Refactoring Agent findings — show category in plain English
+        _category_labels = {
+            "guidance_update": ("📋 Guidance update needed", "#90c8ff"),
+            "new_content": ("✨ New content opportunity", "#90c8ff"),
+            "pricing": ("💰 Pricing may be stale", "#ffb74d"),
+            "model_deprecation": ("⚠️ Model deprecated", "#ffb74d"),
+            "new_model": ("🆕 New model available", "#a5d6a7"),
+            "structural": ("🏗️ Structural improvement", "#ce93d8"),
+            "core_removal": ("🔴 Core content removed", "#ff5252"),
+            "refactoring": ("🔧 Refactoring suggested", "#ce93d8"),
+        }
+        category = finding.category or ""
+        if category in _category_labels:
+            label, color = _category_labels[category]
+            parts.append(f'<span style="color:{color}; font-size:0.82em;">{label}</span>')
+        elif category:
+            # Unknown category — show it cleaned up
+            parts.append(f'<span style="color:rgba(255,255,255,0.5); font-size:0.82em;">{_e(category.replace("_", " ").title())}</span>')
+
     return " ".join(parts) if parts else '<span style="color:rgba(255,255,255,0.3); font-size:0.82em;">—</span>'
 
 
