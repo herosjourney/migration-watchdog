@@ -245,7 +245,11 @@ class TestPRModeSmoke:
                 mock_client_cls.return_value = mock_client
 
                 with patch("main.boto3.resource"):
-                    asyncio.run(_main_module.run_scan())
+                    with patch("main.SourceFetcher") as mock_sf_cls:
+                        mock_sf = MagicMock()
+                        mock_sf.fetch_all_sources = AsyncMock(return_value=_mock_auth_data)
+                        mock_sf_cls.return_value = mock_sf
+                        asyncio.run(_main_module.run_scan())
 
         except SystemExit as exc:
             # run_scan calls sys.exit(1) on failure — treat as test failure
