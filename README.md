@@ -91,13 +91,23 @@ available to new customers and whether newer alternatives exist.
 
 **Tools available:**
 - `compare_pricing` — compares pricing-cache.md against current AWS Pricing API data
-- `compare_models` — compares AI model mapping guides against current Gemini/OpenAI/Bedrock data
+- `compare_models` — compares AI model mapping guides against current Gemini/OpenAI/Bedrock data. Flags models present in the current provider catalog but missing from the plugin's mapping table as `new_content` findings — no hard-coding of model names required
 - `compare_design_ref` — compares design-ref files against current AWS best practices
-- `check_new_content_opportunities` — identifies gaps in agentic AI coverage (weekly scans only)
+- `check_new_content_opportunities` — identifies gaps in agentic AI coverage, new AWS services, and framework compatibility issues (weekly scans only)
 - `search_aws_docs` — live search of AWS documentation via the [AWS Documentation MCP Server](https://github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server) (`awslabs.aws-documentation-mcp-server`). Searches `docs.aws.amazon.com` for current service status, feature availability, and best practices
+- `search_gcp_docs` — verifies GCP-side claims in the migration plugin against current Google Cloud documentation
 - `check_service_obsolescence` — proactively checks each recommended service for closure, newer alternatives, and updated best practices using the AWS Documentation MCP Server
-- `web_search` — DuckDuckGo search for current information when pre-fetched data is insufficient
+- `web_search` — DuckDuckGo search for current information when pre-fetched data is insufficient, including framework compatibility issues not in official docs
 - `create_finding` — creates a structured Finding with source citations
+
+**Bedrock-specific checks (weekly scans):**
+The Analysis Agent explicitly checks AI migration reference files for:
+- Bedrock Mantle 10,000 RPM shared account limit (separate from per-model TPM quotas)
+- `max_tokens` reservation trap — Bedrock deducts `max_tokens` from TPM quota at request start
+- AgentCore Harness preview status and 4-region availability
+- gpt-oss on Bedrock as a migration path option
+- Bedrock Mantle Responses API capabilities and Assistants API shortcut
+- Framework retarget compatibility gotchas (LangChain, LangGraph, CrewAI, AutoGen)
 
 **Limitations:**
 - In PR-triggered mode, only sees the changed files plus shared artifacts. Cannot
@@ -154,6 +164,15 @@ or incorrect.
 - `eol_date` — exact match on normalised YYYY-MM-DD
 - `service_name` / `feature_availability` — live docs search + LLM judgment
 - `quota_limit` / `api_name` / `other_factual` — live docs search + LLM judgment
+- `service_limit` — throughput limits (e.g. RPM caps) — live docs search + LLM judgment
+- `preview_status` — preview/GA status — live docs search + LLM judgment
+
+**File coverage:**
+The Currency Auditor scans all files in the `gcp-to-aws/` path, including AI migration
+phase files (`clarify-ai.md`, `design-ai.md`, `ai-migration-guardrails.md`,
+`generate-artifacts-ai.md`) and design reference files (`design-ref-harness.md`,
+`design-ref-agentic-to-agentcore.md`). Files without a detectable migration context
+are skipped with a warning.
 
 **Severity levels:**
 - `correctness` → HIGH risk — factually wrong (e.g., service closed to new customers)
@@ -201,7 +220,30 @@ These are informational — they don't fail CI.
 
 ---
 
-## Findings severity and CI behavior
+### 5. Security Auditor
+
+**Model:** Static pattern matching (no LLM)
+
+**Purpose:** Scans reference files that describe generated scripts, Terraform, and Python
+code for security anti-patterns. Flags issues in the plugin's *instructions* before they
+produce vulnerable infrastructure for users.
+
+**Checks performed:**
+- Open administrative ports (22/SSH, 3389/RDP, 5900/VNC) from 0.0.0.0/0 in security groups
+- Secrets stored in shell variables (exposed in `ps aux`, shell history, core dumps)
+- Database passwords in Terraform variables (plaintext in state)
+- Missing `deletion_protection` on Aurora/RDS clusters
+- Secrets Manager rotation blocks without compliance gate (breaks non-compliance stacks)
+- `max_tokens` set to high values in Bedrock provider adapters (TPM quota burndown trap)
+
+**Files scanned:** `generate-artifacts-*`, `networking.md`, `security.md`, `design-infra.md`
+
+**Limitations:**
+- Pattern matching only — cannot reason about semantic correctness of generated code.
+- Detects anti-patterns described in markdown prose and code blocks, not just literal code.
+- Security findings never fail CI regardless of severity.
+
+---
 
 | Severity | Risk | CI behavior |
 |----------|------|-------------|
