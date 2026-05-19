@@ -1,0 +1,4 @@
+{
+  "claims_count": 1,
+  "note": "Duplicate claim text should be deduplicated to a single Claim by claim_id"
+}

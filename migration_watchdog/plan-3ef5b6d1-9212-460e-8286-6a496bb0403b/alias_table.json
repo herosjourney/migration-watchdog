@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "last_synced": "2026-05-15",
+  "entries": {
+    "Claude Sonnet 4.6": "anthropic.claude-sonnet-4-5-20251001-v1:0",
+    "Claude Opus 4.7": "us.anthropic.claude-opus-4-7",
+    "Gemini 2.0 Flash": "gemini-2.0-flash-001",
+    "Claude 3.5 Sonnet": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "Claude 3 Haiku": "anthropic.claude-3-haiku-20240307-v1:0"
+  },
+  "pending_review": []
+}

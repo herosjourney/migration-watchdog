@@ -1,0 +1,62 @@
+# Migration Plugin Watchdog — Weekly Scan
+#
+# Runs the watchdog analysis pipeline every Monday at 9am UTC.
+# Can also be triggered manually via the "Run workflow" button.
+#
+# The pipeline:
+# 1. Fetches the target repo content and open PRs
+# 2. Fetches authoritative sources (AWS docs, Gemini, OpenAI, etc.)
+# 3. Runs the Strands Analysis Agent (Claude Opus 4.7) to identify outdated content
+# 4. Deduplicates findings against existing findings and open PRs
+# 5. Reviews medium/high-risk findings with the Review Agent (Nova 2 Pro)
+# 6. Persists findings to DynamoDB
+# 7. Runs a refactoring assessment
+#
+# Findings are reviewed in the private dashboard. Approved findings
+# become pull requests on the target repo.
+
+name: Migration Plugin Watchdog
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9am UTC
+  workflow_dispatch: {}    # Manual trigger via GitHub UI
+
+permissions:
+  id-token: write   # Required for OIDC federation with AWS
+  contents: read    # Required for actions/checkout
+
+jobs:
+  scan:
+    name: Weekly Watchdog Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-watchdog.txt
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install dependencies
+        run: pip install -r requirements-watchdog.txt
+
+      - name: Run watchdog scan
+        run: python -m migration_watchdog.main
+        env:
+          GITHUB_APP_ID: ${{ secrets.WATCHDOG_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.WATCHDOG_APP_PRIVATE_KEY }}
+          GITHUB_INSTALLATION_ID: ${{ secrets.WATCHDOG_INSTALLATION_ID }}
+          DYNAMODB_TABLE: watchdog-findings
+          AWS_REGION: us-east-1

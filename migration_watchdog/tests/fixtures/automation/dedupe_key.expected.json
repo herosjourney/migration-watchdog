@@ -1,0 +1,15 @@
+{
+  "findings_count_min": 2,
+  "note": "Two distinct manual actions should produce two separate Findings with different action_fingerprints",
+  "findings": [
+    {
+      "category": "automation_gap",
+      "finding_schema_version": "automation/1.0"
+    },
+    {
+      "category": "automation_gap",
+      "finding_schema_version": "automation/1.0"
+    }
+  ],
+  "constraint": "all action_fingerprint values must be distinct"
+}
