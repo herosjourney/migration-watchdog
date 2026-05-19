@@ -758,19 +758,27 @@ def _format_description(description: str) -> str:
 
         # Section headers: "Advantages:", "Disadvantages:", "Proposed structure:", etc.
         header_match = _re.match(
-            r'^(Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note|Considerations|Tradeoffs)s?:\s*(.*)$',
+            r'^(Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Note|Considerations|Tradeoffs)s?:\s*(.*)$',
             stripped, _re.IGNORECASE
         )
         if header_match:
             close_list()
-            label = header_match.group(1)
+            label = header_match.group(1).title()
             rest = header_match.group(2).strip()
-            html_parts.append(
-                f'<p style="margin:12px 0 4px 0; font-weight:bold; color:rgba(255,255,255,0.9); '
-                f'border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:2px;">{_e(label)}:</p>'
-            )
-            # Mark that subsequent lines should be treated as bullet items
-            in_bullet_section = label.lower() in _BULLET_SECTION_HEADERS
+            # Use different styling for Proposed Structure vs Advantages/Disadvantages
+            is_bullet_section = label.lower() in _BULLET_SECTION_HEADERS
+            is_proposal = 'proposed' in label.lower()
+            if is_proposal:
+                html_parts.append(
+                    f'<p style="margin:16px 0 8px 0; font-weight:bold; color:#90c8ff; '
+                    f'border-bottom:1px solid rgba(100,160,255,0.25); padding-bottom:4px; font-size:1em;">📋 {_e(label)}:</p>'
+                )
+            else:
+                html_parts.append(
+                    f'<p style="margin:12px 0 4px 0; font-weight:bold; color:rgba(255,255,255,0.9); '
+                    f'border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:2px;">{_e(label)}:</p>'
+                )
+            in_bullet_section = is_bullet_section and not is_proposal
             if rest:
                 if in_bullet_section:
                     html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
@@ -780,7 +788,6 @@ def _format_description(description: str) -> str:
                 else:
                     html_parts.append(split_prose_into_bullets(rest))
             elif in_bullet_section:
-                # Open the list — items will follow on subsequent lines
                 html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
                 in_list = True
                 list_type = 'ul'
@@ -834,10 +841,38 @@ def _render_general_finding_detail(finding: Finding) -> str:
     """Render a ``<details>`` panel for non-currency/automation findings."""
     parts: list[str] = []
 
-    # --- Description (the main content) ---
+    # --- Description — split into intro + structured sections for readability ---
     description = finding.description
     if description:
-        parts.append(f'<div style="margin-bottom:8px;">{_format_description(description)}</div>')
+        import re as _re_desc
+        import json as _json_desc
+        # Decode JSON escape sequences
+        try:
+            if '\\n' in description or '\\u' in description:
+                description = _json_desc.loads(f'"{description}"')
+        except Exception:
+            pass
+
+        # Split the description at the first section header (Advantages:, Disadvantages:, etc.)
+        # Everything before it is the "What's being proposed" intro
+        section_split = _re_desc.split(
+            r'(?=(?:Advantages|Disadvantages|Pros|Cons|Benefits|Drawbacks|Proposed Structure|Proposed structure|Summary|Background|Impact|Solution|Recommendation|Considerations|Tradeoffs)s?:)',
+            description, maxsplit=1
+        )
+        intro = section_split[0].strip()
+        rest = section_split[1].strip() if len(section_split) > 1 else ''
+
+        if intro:
+            parts.append(
+                '<div style="background:rgba(100,160,255,0.08); border-left:3px solid rgba(100,160,255,0.4); '
+                'padding:12px 16px; border-radius:0 8px 8px 0; margin-bottom:12px;">'
+                '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; '
+                'color:rgba(100,160,255,0.7); margin-bottom:8px;">What\'s being proposed</div>'
+                f'<div style="color:rgba(255,255,255,0.85); font-size:0.9em; line-height:1.7;">{_format_description(intro)}</div>'
+                '</div>'
+            )
+        if rest:
+            parts.append(f'<div style="margin-top:4px;">{_format_description(rest)}</div>')
 
     # --- Dispute reason (shown prominently when disputed) ---
     review_status = finding.review_status
