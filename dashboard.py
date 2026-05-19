@@ -1375,6 +1375,33 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             except Exception:
                 formatted_date = raw_date[:10] if raw_date else ''
 
+            # Clean up the title for display:
+            # Automation titles like "Automation gap: copy_paste in some/long/path.md"
+            # are redundant since the file path is already in Affected Files.
+            # Strip the filename suffix and translate action_type to plain English.
+            _action_type_plain = {
+                "copy_paste": "copy and paste step",
+                "console_navigation": "manual console step",
+                "cli_command": "CLI command step",
+                "api_call": "API call step",
+                "config_change": "configuration change",
+                "iam_policy": "IAM permissions change",
+                "quota_request": "quota increase request",
+                "manual_approval": "manual approval step",
+                "file_edit": "file edit step",
+            }
+            display_title = f.get('title', '')
+            schema = f.get('finding_schema_version', '')
+            if schema and schema.startswith('automation/'):
+                import re as _re_title
+                # Strip " in path/to/file.md" suffix
+                display_title = _re_title.sub(r'\s+in\s+\S+\.md$', '', display_title)
+                # Translate action_type slug in title (e.g. "copy_paste" → "copy and paste step")
+                for slug, plain in _action_type_plain.items():
+                    display_title = display_title.replace(slug, plain)
+                # Clean up any remaining underscores
+                display_title = display_title.replace('_', ' ')
+
             # Status with color
             status_val = f.get('status', 'pending')
             status_colors = {
@@ -1389,7 +1416,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             <tr>
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
                 <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="The second AI reviewer has not checked this finding yet">🔍 Not yet reviewed</span>'}</td>
-                <td>{_e(f['title'])}</td>
+                <td>{_e(display_title)}</td>
                 <td style="font-size:0.8em; color:#b0bec5;">{_e(', '.join(f['affected_files']))}</td>
                 <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>
                 <td>{status_html}</td>
