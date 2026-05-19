@@ -713,7 +713,10 @@ def _format_description(description: str) -> str:
     def format_inline(text: str) -> str:
         """Format inline markdown: **bold**, `code`."""
         text = _e(text)
-        text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong style="color:#fff;">\1</strong>', text)
+        # Handle **word:** and **word** patterns — bold including trailing colon
+        text = _re.sub(r'\*\*([^*]+?)\*\*', r'<strong style="color:#fff;">\1</strong>', text)
+        # Strip any orphaned ** that weren't matched
+        text = text.replace('**', '')
         text = _re.sub(r'`([^`]+)`', r'<code style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:#b0e0ff;font-size:0.9em;">\1</code>', text)
         return text
 
@@ -763,8 +766,8 @@ def _format_description(description: str) -> str:
         )
         if header_match:
             close_list()
-            label = header_match.group(1).title()
-            rest = header_match.group(2).strip()
+            label = header_match.group(1).title().replace('**', '').strip()
+            rest = header_match.group(2).strip().lstrip('*').strip()
             # Use different styling for Proposed Structure vs Advantages/Disadvantages
             is_bullet_section = label.lower() in _BULLET_SECTION_HEADERS
             is_proposal = 'proposed' in label.lower()
