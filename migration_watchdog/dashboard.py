@@ -1358,9 +1358,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 <th>Scan Date</th><th>Status</th><th>Badges</th><th>Actions</th>
             </tr></thead>
             <tbody>{table_rows}</tbody>
-        </table>"""
-
-    # Build tab content
+        </table>"""    # Build tab content
     tab_buttons = ""
     tab_panels = ""
     first = True
@@ -1374,9 +1372,9 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
         tab_buttons += f'<button class="{active_class}" onclick="showTab(\'{key}\')">{group["label"]} <span class="tab-count">({count})</span></button>'
         tab_panels += f"""
         <div id="tab-{key}" class="tab-panel" style="{panel_style}">
-            <div style="background:#f0f4ff; border-left:4px solid #1565c0; padding:10px 14px; margin-bottom:12px; border-radius:4px;">
+            <div class="agent-desc">
                 <strong>{group["label"]}</strong><br>
-                <span style="color:#444; font-size:0.9em;">{group["description"]}</span>
+                {group["description"]}
             </div>
             {render_findings_table(group["findings"])}
         </div>"""
@@ -1388,33 +1386,215 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Watchdog Dashboard</title>
     <style>
-        body {{ font-family: sans-serif; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }}
-        .layout {{ display: flex; flex: 1; }}
-        .sidebar {{ width: 260px; min-width: 220px; background: #f8f9fa; border-right: 1px solid #ddd; padding: 16px; overflow-y: auto; }}
-        .sidebar h2 {{ font-size: 1em; margin: 0 0 12px 0; color: #333; }}
-        .run-item {{ padding: 8px 10px; margin: 4px 0; border-radius: 4px; cursor: pointer; border: 1px solid #ddd; background: white; font-size: 0.85em; }}
-        .run-item:hover {{ background: #e3f2fd; border-color: #1565c0; }}
-        .run-item.active {{ background: #1565c0; color: white; border-color: #1565c0; }}
-        .run-item .run-date {{ font-weight: bold; }}
-        .run-item .run-meta {{ color: #666; font-size: 0.9em; }}
-        .run-item.active .run-meta {{ color: #cce; }}
-        .run-all {{ padding: 8px 10px; margin: 4px 0; border-radius: 4px; cursor: pointer; border: 1px solid #1565c0; background: #e3f2fd; font-size: 0.85em; font-weight: bold; color: #1565c0; }}
-        .run-all:hover {{ background: #1565c0; color: white; }}
-        .main {{ flex: 1; padding: 1.5rem; overflow-x: auto; min-width: 0; }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 40%, #24243e 70%, #0f3460 100%);
+            background-attachment: fixed;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }}
+        /* Glassmorphism base */
+        .glass {{
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+        }}
+        .layout {{ display: flex; flex: 1; gap: 0; }}
+        .sidebar {{
+            width: 240px;
+            min-width: 200px;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-right: 1px solid rgba(255,255,255,0.1);
+            padding: 20px 14px;
+            overflow-y: auto;
+        }}
+        .sidebar h2 {{
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: rgba(255,255,255,0.4);
+            margin-bottom: 14px;
+        }}
+        .run-item {{
+            padding: 10px 12px;
+            margin: 5px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.05);
+            font-size: 0.82em;
+            transition: all 0.2s;
+        }}
+        .run-item:hover {{
+            background: rgba(255,255,255,0.12);
+            border-color: rgba(100,160,255,0.4);
+            transform: translateX(2px);
+        }}
+        .run-item.active {{
+            background: rgba(100,160,255,0.2);
+            border-color: rgba(100,160,255,0.6);
+        }}
+        .run-item .run-date {{ font-weight: 600; color: #e0e0e0; }}
+        .run-item .run-meta {{ color: rgba(255,255,255,0.45); font-size: 0.9em; margin-top: 2px; }}
+        .run-all {{
+            padding: 10px 12px;
+            margin: 5px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid rgba(100,160,255,0.3);
+            background: rgba(100,160,255,0.1);
+            font-size: 0.82em;
+            font-weight: 600;
+            color: #90c8ff;
+            transition: all 0.2s;
+        }}
+        .run-all:hover {{ background: rgba(100,160,255,0.2); }}
+        .main {{ flex: 1; padding: 24px; overflow-x: auto; min-width: 0; }}
+        h1 {{
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 16px;
+            text-shadow: 0 0 20px rgba(100,160,255,0.4);
+        }}
+        /* Table */
         table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }}
-        th {{ background-color: #f4f4f4; white-space: nowrap; }}
-        button {{ margin: 2px; padding: 4px 10px; cursor: pointer; }}
-        button.danger {{ background: #ffebee; border: 1px solid #c62828; color: #c62828; }}
-        button.danger:hover {{ background: #c62828; color: white; }}
-        details {{ margin-top: 4px; font-size: 0.9em; }}
-        .toolbar {{ display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }}
-        .tabs {{ display: flex; gap: 4px; margin-bottom: 0; flex-wrap: wrap; border-bottom: 2px solid #1565c0; padding-bottom: 0; }}
-        .tab-btn {{ padding: 8px 16px; border: 1px solid #ddd; border-bottom: none; background: #f5f5f5; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 0.9em; }}
-        .tab-btn:hover {{ background: #e3f2fd; }}
-        .tab-btn.active {{ background: #1565c0; color: white; border-color: #1565c0; font-weight: bold; }}
-        .tab-count {{ font-size: 0.85em; opacity: 0.85; }}
-        .tab-panel {{ padding: 16px 0; }}
+        th, td {{
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 10px 12px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 0.88em;
+        }}
+        th {{
+            background: rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.6);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75em;
+            letter-spacing: 0.8px;
+            white-space: nowrap;
+        }}
+        tr:hover td {{ background: rgba(255,255,255,0.03); }}
+        tr:nth-child(even) td {{ background: rgba(255,255,255,0.02); }}
+        /* Buttons */
+        button {{
+            margin: 2px;
+            padding: 5px 12px;
+            cursor: pointer;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.08);
+            color: #e0e0e0;
+            font-size: 0.82em;
+            transition: all 0.2s;
+        }}
+        button:hover {{
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.3);
+        }}
+        button.danger {{
+            background: rgba(198,40,40,0.15);
+            border-color: rgba(198,40,40,0.4);
+            color: #ff8a80;
+        }}
+        button.danger:hover {{
+            background: rgba(198,40,40,0.3);
+        }}
+        /* Tabs */
+        .tabs {{
+            display: flex;
+            gap: 6px;
+            margin-bottom: 0;
+            flex-wrap: wrap;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 0;
+        }}
+        .tab-btn {{
+            padding: 9px 18px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-bottom: none;
+            background: rgba(255,255,255,0.04);
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            font-size: 0.85em;
+            color: rgba(255,255,255,0.55);
+            transition: all 0.2s;
+        }}
+        .tab-btn:hover {{ background: rgba(255,255,255,0.1); color: #fff; }}
+        .tab-btn.active {{
+            background: rgba(100,160,255,0.18);
+            color: #90c8ff;
+            border-color: rgba(100,160,255,0.35);
+            font-weight: 600;
+        }}
+        .tab-count {{ font-size: 0.82em; opacity: 0.7; }}
+        .tab-panel {{ padding: 20px 0; }}
+        /* Details panels */
+        details {{
+            margin-top: 6px;
+            font-size: 0.88em;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        details summary {{
+            padding: 8px 12px;
+            cursor: pointer;
+            color: rgba(255,255,255,0.7);
+            font-weight: 600;
+            user-select: none;
+        }}
+        details summary:hover {{ color: #fff; }}
+        details > div {{ padding: 10px 14px; }}
+        /* Toolbar */
+        .toolbar {{
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            padding: 10px 14px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.07);
+        }}
+        /* Agent description box */
+        .agent-desc {{
+            background: rgba(100,160,255,0.08);
+            border-left: 3px solid rgba(100,160,255,0.5);
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.88em;
+            color: rgba(255,255,255,0.75);
+        }}
+        .agent-desc strong {{ color: #90c8ff; }}
+        /* Scrollbar */
+        ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+        ::-webkit-scrollbar-track {{ background: rgba(255,255,255,0.03); }}
+        ::-webkit-scrollbar-thumb {{ background: rgba(255,255,255,0.15); border-radius: 3px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: rgba(255,255,255,0.25); }}
+        /* Links */
+        a {{ color: #90c8ff; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+        code {{
+            background: rgba(255,255,255,0.1);
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #b0e0ff;
+        }}
+        pre {{ background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; overflow-x: auto; }}
+        pre code {{ background: none; padding: 0; }}
     </style>
 </head>
 <body>
@@ -1426,13 +1606,13 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             <div id="runs-list">Loading...</div>
         </div>
         <div class="main">
-            <h1 style="margin-top:0;">Migration Plugin Watchdog</h1>
+            <h1>🔍 Migration Watchdog</h1>
             {_render_partial_data_warning(scan_run)}
             {_render_merge_checklist(scan_run, enriched_findings)}
             <div class="toolbar">
-                <span><strong>{len(findings_data)}</strong> total findings</span>
-                {'<span style="color:#1565c0; font-weight:bold;">📅 Run: ' + _e(run_id[:8]) + '...</span>' if run_id else ''}
-                <button class="danger" onclick="declineAll()" title="Decline all visible findings">🗑 Decline all visible</button>
+                <span style="color:rgba(255,255,255,0.6);"><strong style="color:#fff;">{len(findings_data)}</strong> total findings</span>
+                {'<span style="color:#90c8ff; font-weight:bold;">📅 Run: ' + _e(run_id[:8]) + '...</span>' if run_id else ''}
+                <button class="danger" onclick="declineAll()">🗑 Decline all visible</button>
             </div>
             <div class="tabs">{tab_buttons}</div>
             {tab_panels}
@@ -1449,7 +1629,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
         fetch('/api/runs').then(r => r.json()).then(data => {{
             const el = document.getElementById('runs-list');
             if (!data.runs || data.runs.length === 0) {{
-                el.innerHTML = '<p style="color:#999;font-size:0.85em;">No runs yet</p>';
+                el.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:0.82em;padding:8px;">No runs yet</p>';
                 return;
             }}
             const currentRunId = new URLSearchParams(window.location.search).get('run_id');
@@ -1465,7 +1645,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 </div>`;
             }}).join('');
         }}).catch(() => {{
-            document.getElementById('runs-list').innerHTML = '<p style="color:#999;font-size:0.85em;">Could not load runs</p>';
+            document.getElementById('runs-list').innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:0.82em;padding:8px;">Could not load runs</p>';
         }});
 
         async function approve(findingId) {{
