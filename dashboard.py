@@ -776,7 +776,7 @@ def _format_description(description: str) -> str:
         stripped = line.strip()
         if not stripped:
             close_list()
-            in_bullet_section = False
+            # Don't reset in_bullet_section on blank lines — items may be separated by blank lines
             continue
 
         # Section headers: "Advantages:", "Disadvantages:", "Proposed structure:", etc.
@@ -802,6 +802,10 @@ def _format_description(description: str) -> str:
                     f'border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:2px;">{_e(label)}:</p>'
                 )
             in_bullet_section = is_bullet_section and not is_proposal
+            if not in_bullet_section:
+                # Entering a non-bullet section (Proposed Structure, Summary, etc.)
+                # — close any open bullet list
+                close_list()
             if rest:
                 if in_bullet_section:
                     html_parts.append(f'<ul style="margin:4px 0; padding-left:20px;">')
@@ -887,6 +891,24 @@ def _render_general_finding_detail(finding: Finding) -> str:
         rest = section_split[1].strip() if len(section_split) > 1 else ''
         # Strip any leading ** left over from bold markdown headers like **Advantages:**
         rest = rest.lstrip('*').strip()
+
+        # Reorder: put Proposed Structure before Advantages/Disadvantages
+        if rest:
+            # Find Proposed Structure section if it exists
+            prop_match = _re_desc.search(
+                r'\*{0,2}Proposed\s+[Ss]tructure\*{0,2}:',
+                rest
+            )
+            adv_match = _re_desc.search(
+                r'\*{0,2}(?:Advantages|Disadvantages)\*{0,2}:',
+                rest
+            )
+            if prop_match and adv_match and prop_match.start() > adv_match.start():
+                # Proposed Structure comes after Advantages — move it to the front
+                prop_start = prop_match.start()
+                proposed_section = rest[prop_start:]
+                adv_section = rest[:prop_start].strip()
+                rest = proposed_section + '\n\n' + adv_section
 
         if intro:
             parts.append(
