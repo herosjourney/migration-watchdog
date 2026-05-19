@@ -1311,12 +1311,12 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 "high": '<span style="color:#ff5252;">🔴 High</span>',
             }
 
-            # Format scan date as "May 18, 2026"
+            # Format scan date as "May 18, 2026" — slice YYYY-MM-DD then reformat
             raw_date = f.get('scan_date', '')
             try:
-                from datetime import datetime as _dt
-                parsed = _dt.fromisoformat(raw_date.replace('Z', '+00:00'))
-                formatted_date = parsed.strftime('%b %d, %Y')
+                y, m, d = raw_date[:10].split('-')
+                month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                formatted_date = f"{month_names[int(m)-1]} {int(d)}, {y}"
             except Exception:
                 formatted_date = raw_date[:10] if raw_date else ''
 
@@ -1333,7 +1333,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             table_rows += f"""
             <tr>
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
-                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.25); font-size:0.82em;">not reviewed</span>'}</td>
+                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;">⏳ Pending review</span>'}</td>
                 <td>{_e(f['title'])}</td>
                 <td style="font-size:0.8em; color:#b0bec5;">{_e(', '.join(f['affected_files']))}</td>
                 <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>

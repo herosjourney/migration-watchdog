@@ -276,62 +276,154 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
 
 
 def _render_currency_payload(payload: dict, finding: Finding) -> str:
-    """Render a ``<details>`` panel for a currency/1.0 finding."""
-    parts: list[str] = []
+    """Render a clean, readable detail card for a currency/1.0 finding.
 
+    Designed for readability by non-technical users. Uses a card layout with
+    clear section headings, generous whitespace, and plain-English labels.
+    """
+    import json as _jd
+
+    sections: list[str] = []
+
+    # --- Truncated payload warning ---
     s3_key = payload.get("auditor_payload_s3_key")
-    is_truncated = s3_key and not payload.get("claim_text") and not payload.get("action_text")
-    if is_truncated:
-        parts.append(
-            '<p style="color:#ffb74d; font-style:italic;">'
+    if s3_key and not payload.get("claim_text"):
+        sections.append(
+            '<div style="background:rgba(255,183,77,0.12); border:1px solid rgba(255,183,77,0.35); '
+            'padding:10px 14px; border-radius:8px; color:#ffb74d; font-size:0.88em;">'
             "⚠️ Showing truncated payload — full details unavailable"
-            "</p>"
+            "</div>"
         )
 
-    claim_text = payload.get("claim_text")
-    if claim_text is not None:
-        parts.append(f'<p><strong>Claim:</strong> &ldquo;{_e(claim_text)}&rdquo;</p>')
-
-    claim_type = payload.get("claim_type")
-    claim_subtype = payload.get("claim_subtype")
-    if claim_type is not None:
-        type_str = _e(claim_type)
-        if claim_subtype:
-            type_str += f" / {_e(claim_subtype)}"
-        parts.append(f"<p><strong>Claim type:</strong> {type_str}</p>")
-
+    # --- Severity banner (most prominent element) ---
     severity = payload.get("severity")
-    if severity is not None:
-        sev_colors = {
-            "correctness": "#ff5252",
-            "outdated": "#ffb74d",
-            "policy_change": "#64b5f6",
+    sev_config = {
+        "correctness": {
+            "bg": "rgba(255,82,82,0.12)",
+            "border": "rgba(255,82,82,0.4)",
+            "icon": "🔴",
+            "label": "Factually Wrong",
+            "desc": "This claim in the plugin is incorrect based on current AWS documentation. It needs to be fixed before users act on it.",
+            "color": "#ff5252",
+        },
+        "outdated": {
+            "bg": "rgba(255,183,77,0.1)",
+            "border": "rgba(255,183,77,0.35)",
+            "icon": "🟡",
+            "label": "Stale Information",
+            "desc": "This was accurate at some point but is no longer current. It should be updated to reflect how AWS works today.",
+            "color": "#ffb74d",
+        },
+        "policy_change": {
+            "bg": "rgba(100,181,246,0.1)",
+            "border": "rgba(100,181,246,0.35)",
+            "icon": "🔵",
+            "label": "Details Have Changed",
+            "desc": "The service or feature still exists, but something about it has changed — a name, a limit, a status, or how it works.",
+            "color": "#64b5f6",
+        },
+        "informational": {
+            "bg": "rgba(144,164,174,0.1)",
+            "border": "rgba(144,164,174,0.3)",
+            "icon": "ℹ️",
+            "label": "Informational Note",
+            "desc": "A minor discrepancy worth noting, but not urgent.",
+            "color": "#90a4ae",
+        },
+    }
+    if severity and severity in sev_config:
+        cfg = sev_config[severity]
+        sections.append(
+            f'<div style="background:{cfg["bg"]}; border:1px solid {cfg["border"]}; '
+            f'border-radius:10px; padding:14px 18px;">'
+            f'<div style="font-size:1.05em; font-weight:700; color:{cfg["color"]}; margin-bottom:6px;">'
+            f'{cfg["icon"]} {cfg["label"]}</div>'
+            f'<div style="color:rgba(255,255,255,0.75); font-size:0.9em; line-height:1.6;">{cfg["desc"]}</div>'
+            f'</div>'
+        )
+
+    # --- The claim itself ---
+    claim_text = payload.get("claim_text")
+    if claim_text:
+        claim_type = payload.get("claim_type", "")
+        type_display = {
+            "feature_availability": "Feature availability",
+            "service_name": "Service name",
+            "region_count": "Region count",
+            "region_list": "Region list",
+            "price": "Price",
+            "model_id": "Model ID",
+            "eol_date": "End-of-life date",
+            "quota_limit": "Quota limit",
+            "service_limit": "Service limit",
+            "preview_status": "Preview / GA status",
+            "other_factual": "Factual claim",
         }
-        sev_color = sev_colors.get(severity, "#aaa")
-        parts.append(
-            f'<p><strong>Severity:</strong> '
-            f'<span style="color:{sev_color}; font-weight:bold;">{_e(severity)}</span></p>'
+        subtype = payload.get("claim_subtype")
+        type_label = type_display.get(claim_type, claim_type.replace("_", " ").title() if claim_type else "")
+        if subtype:
+            type_label += f" · {_e(subtype)}"
+
+        sections.append(
+            '<div style="background:rgba(255,255,255,0.05); border-radius:10px; padding:16px 18px;">'
+            '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; '
+            'color:rgba(255,255,255,0.4); margin-bottom:8px;">What the plugin currently says</div>'
+            f'<div style="font-size:1em; color:#fff; font-style:italic; line-height:1.6; '
+            f'border-left:3px solid rgba(255,255,255,0.2); padding-left:12px;">'
+            f'&ldquo;{_e(claim_text)}&rdquo;</div>'
+            + (f'<div style="margin-top:8px; font-size:0.78em; color:rgba(255,255,255,0.35);">'
+               f'Claim type: {_e(type_label)}</div>' if type_label else '')
+            + '</div>'
         )
 
+    # --- What's actually true now ---
     actual_value = payload.get("actual_value")
-    if actual_value is not None:
-        parts.append(f"<p><strong>Actual value:</strong> {_e(actual_value)}</p>")
-
     suggested_fix = payload.get("suggested_fix")
-    if suggested_fix is not None:
-        parts.append(f'<p><strong>Suggested fix:</strong> <span style="color:#a5d6a7;">{_e(suggested_fix)}</span></p>')
 
+    if actual_value or suggested_fix:
+        fix_html = '<div style="background:rgba(165,214,167,0.08); border:1px solid rgba(165,214,167,0.25); border-radius:10px; padding:16px 18px;">'
+        fix_html += '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; color:rgba(165,214,167,0.6); margin-bottom:10px;">How to resolve this</div>'
+        if actual_value:
+            fix_html += (
+                f'<div style="margin-bottom:10px;">'
+                f'<div style="font-size:0.8em; color:rgba(255,255,255,0.45); margin-bottom:4px;">Current reality</div>'
+                f'<div style="color:#a5d6a7; font-size:0.92em; line-height:1.6;">{_e(actual_value)}</div>'
+                f'</div>'
+            )
+        if suggested_fix:
+            fix_html += (
+                f'<div>'
+                f'<div style="font-size:0.8em; color:rgba(255,255,255,0.45); margin-bottom:4px;">Suggested fix</div>'
+                f'<div style="color:#c8e6c9; font-size:0.92em; line-height:1.6;">{_e(suggested_fix)}</div>'
+                f'</div>'
+            )
+        fix_html += '</div>'
+        sections.append(fix_html)
+
+    # --- Source and scope (compact footer row) ---
+    footer_parts: list[str] = []
     verification_source = payload.get("verification_source")
-    if verification_source is not None:
-        parts.append(
-            f'<p><strong>Source:</strong> '
-            f'<a href="{_e(verification_source)}" target="_blank">{_e(verification_source)}</a></p>'
+    if verification_source:
+        footer_parts.append(
+            f'<span><span style="color:rgba(255,255,255,0.35);">Source: </span>'
+            f'<a href="{_e(verification_source)}" target="_blank" style="color:#90c8ff;">'
+            f'{_e(verification_source[:60])}{"…" if len(verification_source) > 60 else ""}</a></span>'
+        )
+    scope = payload.get("scope")
+    if scope:
+        footer_parts.append(
+            f'<span><span style="color:rgba(255,255,255,0.35);">Scope: </span>'
+            f'<span style="color:rgba(255,255,255,0.6);">{_e(scope)}</span></span>'
+        )
+    if footer_parts:
+        sections.append(
+            '<div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.82em; '
+            'padding:8px 4px; border-top:1px solid rgba(255,255,255,0.06); margin-top:2px;">'
+            + " · ".join(footer_parts)
+            + '</div>'
         )
 
-    scope = payload.get("scope")
-    if scope is not None:
-        parts.append(f"<p><strong>Scope:</strong> {_e(scope)}</p>")
-
+    # --- AI review status ---
     review_status = finding.review_status
     review_notes = finding.review_notes
     primary_reasoning = finding.primary_reasoning
@@ -339,36 +431,44 @@ def _render_currency_payload(payload: dict, finding: Finding) -> str:
     if review_status == "disputed":
         dispute_reason = review_notes or primary_reasoning or "No reason provided."
         try:
-            import json as _json_d
             if '\\n' in dispute_reason or '\\u' in dispute_reason:
-                dispute_reason = _json_d.loads(f'"{dispute_reason}"')
+                dispute_reason = _jd.loads(f'"{dispute_reason}"')
         except Exception:
             pass
-        parts.append(
-            '<div style="background:rgba(198,40,40,0.2); border-left:4px solid #ef5350; '
-            'padding:10px 14px; margin:8px 0; border-radius:4px;">'
-            '<strong style="color:#ef9a9a;">⛔ Disputed by review agent</strong><br>'
-            f'<span style="color:#ffcdd2; font-size:0.9em; white-space:pre-wrap;">{_e(dispute_reason)}</span>'
+        sections.append(
+            '<div style="background:rgba(239,83,80,0.1); border:1px solid rgba(239,83,80,0.35); '
+            'padding:14px 18px; border-radius:10px;">'
+            '<div style="color:#ef9a9a; font-weight:700; margin-bottom:8px;">⛔ AI Review Agent Disputed This Finding</div>'
+            f'<div style="color:#ffcdd2; font-size:0.88em; line-height:1.7; white-space:pre-wrap;">{_e(dispute_reason)}</div>'
+            '</div>'
+        )
+    elif review_status == "confirmed":
+        sections.append(
+            '<div style="display:flex; align-items:center; gap:10px; padding:10px 14px; '
+            'background:rgba(165,214,167,0.07); border-radius:8px; font-size:0.85em;">'
+            '<span style="font-size:1.1em;">✅</span>'
+            '<span style="color:#a5d6a7;">Independently verified by the AI review agent — this finding is accurate.</span>'
             '</div>'
         )
     elif review_status == "corrected":
-        parts.append(
-            f'<p><strong>Review status:</strong> '
-            f'<span style="color:#ffb74d; font-weight:bold;">corrected</span></p>'
-        )
-        if review_notes:
-            parts.append(f"<p><strong>Review notes:</strong> {_e(review_notes)}</p>")
-    elif review_status == "confirmed":
-        parts.append(
-            f'<p><strong>Review status:</strong> '
-            f'<span style="color:#a5d6a7; font-weight:bold;">confirmed</span></p>'
+        sections.append(
+            '<div style="padding:10px 14px; background:rgba(255,183,77,0.08); border-radius:8px; font-size:0.85em;">'
+            '<div style="color:#ffb74d; margin-bottom:4px;">✏️ Corrected by the AI review agent</div>'
+            + (f'<div style="color:rgba(255,255,255,0.6); line-height:1.6;">{_e(review_notes)}</div>' if review_notes else '')
+            + '</div>'
         )
 
-    inner = "\n".join(parts)
+    inner = '\n'.join(
+        f'<div style="margin-bottom:10px;">{s}</div>' for s in sections
+    )
+
     return (
         "<details>"
-        "<summary style='cursor:pointer; color:#90c8ff;'>Currency Finding Details</summary>"
-        f'<div style="padding:10px 14px; color:#e0e0e0; background:rgba(0,0,0,0.35); border-radius:0 0 8px 8px; border:1px solid rgba(255,255,255,0.08);">{inner}</div>'
+        "<summary style='cursor:pointer; color:rgba(255,255,255,0.5); font-size:0.85em; "
+        "padding:8px 0; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;'>"
+        "<span style='font-size:0.8em;'>▶</span> View finding details"
+        "</summary>"
+        f'<div style="padding:16px 4px 4px 4px;">{inner}</div>'
         "</details>"
     )
 
@@ -939,8 +1039,11 @@ def _finding_to_dict(finding: Finding) -> dict[str, Any]:
         }
         # Compute whether the dismissal cooldown is still active.
         try:
+            from datetime import timezone as _tz
             expires = datetime.fromisoformat(finding.dismissal.cooldown_expires)
-            result["dismissal_active"] = datetime.utcnow() < expires
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=_tz.utc)
+            result["dismissal_active"] = datetime.now(_tz.utc) < expires
         except (ValueError, TypeError):
             result["dismissal_active"] = False
     else:
@@ -1203,19 +1306,38 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             badges_html = _render_list_badges(finding_obj, dismissal_active=dismissal_active)
 
             risk_badge_map = {
-                "low": '<span style="color:green;">🟢 Low</span>',
-                "medium": '<span style="color:orange;">🟡 Medium</span>',
-                "high": '<span style="color:red;">🔴 High</span>',
+                "low": '<span style="color:#a5d6a7;">🟢 Low</span>',
+                "medium": '<span style="color:#ffb74d;">🟡 Medium</span>',
+                "high": '<span style="color:#ff5252;">🔴 High</span>',
             }
+
+            # Format scan date as "May 18, 2026" — slice YYYY-MM-DD then reformat
+            raw_date = f.get('scan_date', '')
+            try:
+                y, m, d = raw_date[:10].split('-')
+                month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                formatted_date = f"{month_names[int(m)-1]} {int(d)}, {y}"
+            except Exception:
+                formatted_date = raw_date[:10] if raw_date else ''
+
+            # Status with color
+            status_val = f.get('status', 'pending')
+            status_colors = {
+                "pending": "#b0bec5",
+                "approved": "#a5d6a7",
+                "declined": "#ef9a9a",
+            }
+            status_color = status_colors.get(status_val, "#b0bec5")
+            status_html = f'<span style="color:{status_color};">{_e(status_val)}</span>'
 
             table_rows += f"""
             <tr>
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
-                <td>{review_badge}</td>
+                <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;">⏳ Pending review</span>'}</td>
                 <td>{_e(f['title'])}</td>
-                <td style="font-size:0.8em;">{_e(', '.join(f['affected_files']))}</td>
-                <td style="font-size:0.8em;">{_e(f['scan_date'])}</td>
-                <td>{_e(f['status'])}</td>
+                <td style="font-size:0.8em; color:#b0bec5;">{_e(', '.join(f['affected_files']))}</td>
+                <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>
+                <td>{status_html}</td>
                 <td>{badges_html}</td>
                 <td>
                     <button onclick="approve('{_e(f['finding_id'])}')">Approve</button>
@@ -1511,7 +1633,15 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
             }}
             const currentRunId = new URLSearchParams(window.location.search).get('run_id');
             el.innerHTML = data.runs.slice(0, 5).map(run => {{
-                const date = run.start_timestamp ? run.start_timestamp.substring(0, 16).replace('T', ' ') : 'unknown';
+                let date = 'unknown';
+                if (run.start_timestamp) {{
+                    try {{
+                        const d = new Date(run.start_timestamp);
+                        date = d.toLocaleDateString('en-US', {{ month: 'short', day: 'numeric', year: 'numeric' }});
+                    }} catch(e) {{
+                        date = run.start_timestamp.substring(0, 10);
+                    }}
+                }}
                 const count = run.findings_count || 0;
                 const status = run.status || '';
                 const statusIcon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '🔄';
