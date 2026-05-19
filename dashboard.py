@@ -255,14 +255,18 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
 
     elif schema.startswith("automation/"):
         gap_type = payload.get("gap_type")
-        gap_map = {
-            "full_gap": ("🔴 No automation exists", "#ff5252"),
-            "partial_gap": ("🟡 Partially automated", "#ffb74d"),
-            "no_gap": ("✅ Already automated", "#a5d6a7"),
-        }
-        if gap_type in gap_map:
-            label, color = gap_map[gap_type]
+        cli_equivalent = payload.get("cli_equivalent")
+        # If a CLI equivalent exists, the point is "this CAN be automated" not "nothing exists"
+        if gap_type == "full_gap":
+            if cli_equivalent:
+                label, color = ("🔴 Could be automated with AWS CLI", "#ff5252")
+            else:
+                label, color = ("🔴 No CLI equivalent found", "#ff5252")
             parts.append(f'<span style="color:{color}; font-size:0.82em;">{label}</span>')
+        elif gap_type == "partial_gap":
+            parts.append('<span style="color:#ffb74d; font-size:0.82em;">🟡 Partially automated</span>')
+        elif gap_type == "no_gap":
+            parts.append('<span style="color:#a5d6a7; font-size:0.82em;">✅ Already automated</span>')
 
         if payload.get("human_gate") == "required":
             parts.append('<span style="color:#ce93d8; font-size:0.82em;">🔒 needs approval</span>')
@@ -1426,6 +1430,12 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                     display_title = display_title.replace(slug, plain)
                 # Clean up any remaining underscores
                 display_title = display_title.replace('_', ' ')
+                # Append the action_text so the user knows what specific step is being flagged
+                action_text = (f.get('auditor_payload') or {}).get('action_text', '')
+                if action_text:
+                    # Truncate long action text to keep the title scannable
+                    short_action = action_text[:80] + ('…' if len(action_text) > 80 else '')
+                    display_title = f'{display_title} — {short_action}'
 
             # Status with color
             status_val = f.get('status', 'pending')
