@@ -862,6 +862,8 @@ def _render_general_finding_detail(finding: Finding) -> str:
         )
         intro = section_split[0].strip()
         rest = section_split[1].strip() if len(section_split) > 1 else ''
+        # Strip any leading ** left over from bold markdown headers like **Advantages:**
+        rest = rest.lstrip('*').strip()
 
         if intro:
             parts.append(
