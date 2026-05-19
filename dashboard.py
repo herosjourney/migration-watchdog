@@ -1517,7 +1517,7 @@ async def dashboard_page(run_id: Optional[str] = Query(default=None)):
                 <td>{risk_badge_map.get(f['risk_level'], f['risk_level'])}</td>
                 <td>{review_badge if review_badge else '<span style="color:rgba(255,255,255,0.45); font-size:0.82em;" title="The second AI reviewer has not checked this finding yet">🔍 Not yet reviewed</span>'}</td>
                 <td>{_e(display_title)}</td>
-                <td style="font-size:0.8em; color:#b0bec5;">{_e(', '.join(f['affected_files']))}</td>
+                <td style="font-size:0.8em; color:#b0bec5;">{('<br>'.join(_e(fp) for fp in f['affected_files'])) if f['affected_files'] else ''}</td>
                 <td style="font-size:0.82em; color:#b0bec5; white-space:nowrap;">{_e(formatted_date)}</td>
                 <td>{status_html}</td>
                 <td>{badges_html}</td>
