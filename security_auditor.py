@@ -137,11 +137,26 @@ Do NOT output any explanation outside the JSON array.
 
 
 def _build_security_prompt(file_path: str, content: str) -> str:
-    """Build the user message for the security review LLM call."""
+    """Build the user message for the security review LLM call.
+
+    For files longer than 8000 chars, sends the content in chunks and
+    notes the truncation so the LLM knows it may not see the full file.
+    """
+    # Increase limit to 12000 chars to reduce truncation of long generate-artifacts files
+    _CONTENT_LIMIT = 12000
+    truncated = len(content) > _CONTENT_LIMIT
+    content_to_send = content[:_CONTENT_LIMIT]
+    truncation_note = (
+        f"\n\n**NOTE: File is {len(content)} chars — only first {_CONTENT_LIMIT} shown. "
+        "Security rules near the end of the file may not be visible.**"
+        if truncated else ""
+    )
     return (
         f"Review this migration plugin reference file for security issues.\n\n"
-        f"File path: {file_path}\n\n"
-        f"```markdown\n{content[:8000]}\n```\n\n"
+        f"File path: {file_path}\n"
+        f"File length: {len(content)} chars{' (TRUNCATED)' if truncated else ''}\n\n"
+        f"```markdown\n{content_to_send}\n```"
+        f"{truncation_note}\n\n"
         "Output a JSON array of security issues found. Output [] if none."
     )
 
@@ -187,6 +202,10 @@ class LLMSecurityScanner:
         Returns a list of issue dicts with keys:
         issue_type, severity, title, description, suggested_fix,
         line_context, source_url
+
+        Returns [] on clean scan (no issues found) OR on failure.
+        Check logs to distinguish: failures log at ERROR level with
+        'scan failed', clean scans log at DEBUG level with 'no issues found'.
         """
         try:
             model = BedrockModel(
@@ -201,11 +220,19 @@ class LLMSecurityScanner:
             )
             prompt = _build_security_prompt(file_path, content)
             response_text = str(agent(prompt))
-            return self._parse_response(response_text, file_path)
+            issues = self._parse_response(response_text, file_path)
+            if not issues:
+                logger.debug(
+                    "LLMSecurityScanner: no issues found in %s (clean scan)",
+                    file_path,
+                )
+            return issues
         except Exception:
-            logger.exception(
-                "LLMSecurityScanner: scan failed for %s; returning empty list",
+            logger.error(
+                "LLMSecurityScanner: scan FAILED for %s — returning [] due to exception. "
+                "Zero findings from this file may mean scan failure, not clean file.",
                 file_path,
+                exc_info=True,
             )
             return []
 
@@ -229,9 +256,10 @@ class LLMSecurityScanner:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            logger.warning(
-                "LLMSecurityScanner: failed to parse JSON response for %s; "
-                "response preview: %r",
+            logger.error(
+                "LLMSecurityScanner: failed to parse JSON response for %s — "
+                "returning [] due to parse failure (not a clean scan). "
+                "Response preview: %r",
                 file_path,
                 response_text[:200],
             )
@@ -345,6 +373,8 @@ async def run_security_audit(
     scanner = LLMSecurityScanner()
     findings: list[Finding] = []
     seen_keys: set = set()
+    scanned_count = 0
+    skipped_count = 0
 
     for file_path, content in repo_content.files.items():
         # Only scan security-relevant files
@@ -353,12 +383,15 @@ async def run_security_audit(
             for pattern in LLMSecurityScanner.SECURITY_RELEVANT_PATTERNS
         )
         if not is_relevant:
+            skipped_count += 1
             continue
 
         # Apply file filter if provided
         if file_filter and not any(f in file_path for f in file_filter):
+            skipped_count += 1
             continue
 
+        scanned_count += 1
         logger.info("Security audit: scanning %s", file_path)
         issues = scanner.scan_file(file_path, content)
 
@@ -375,8 +408,11 @@ async def run_security_audit(
                 )
 
     logger.info(
-        "Security audit completed: %d findings from %d files",
+        "Security audit completed: %d findings from %d files scanned "
+        "(%d files skipped as not security-relevant, %d total loaded)",
         len(findings),
+        scanned_count,
+        skipped_count,
         len(repo_content.files),
     )
     return findings

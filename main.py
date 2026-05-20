@@ -149,10 +149,15 @@ async def run_scan(_source_fetcher=None) -> None:
             logger.info("PR-triggered run without App credentials — using checkout files …")
             files: dict[str, str] = {}
             # Load changed reference files
+            # Normalize absolute paths to relative paths so auditor pattern matching works
+            # (auditors check for patterns like "gcp-to-aws/" which won't match absolute paths)
+            _cwd = os.getcwd()
             for file_path in config.changed_files:
                 try:
                     with open(file_path, encoding="utf-8") as _f:
-                        files[file_path] = _f.read()
+                        # Store with relative path key for consistent auditor filtering
+                        rel_path = os.path.relpath(file_path, _cwd) if os.path.isabs(file_path) else file_path
+                        files[rel_path] = _f.read()
                 except OSError as exc:
                     logger.warning("Could not read %s: %s", file_path, exc)
             # Always merge shared artifacts needed for full audit coverage:

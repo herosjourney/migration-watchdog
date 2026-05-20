@@ -1019,8 +1019,8 @@ def _build_pricing_prompt(
     """Build a focused prompt for pricing cache analysis only."""
     sections: list[str] = [f"## Pricing Analysis for Run: {run_id}\n"]
 
-    # Only include pricing-cache.md
-    pricing_path = "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
+    # Only include pricing-cache.md — use substring match to handle both path variants
+    # Canonical path: migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md
     for path, content in repo_content.files.items():
         if "pricing-cache" in path:
             sections.append(f"### File: {path}\n```\n{content[:8000]}\n```\n")
