@@ -495,6 +495,7 @@ python -m migration_watchdog.main
 | `WATCHDOG_PAYLOAD_BUCKET` | — | S3 bucket for oversized payloads |
 | `AWS_REGION` | `us-east-1` | AWS region |
 | `SEVERITY_THRESHOLD` | `outdated` | PR comment filter: `outdated` or `low` |
+| `TAVILY_API_KEY` | — | Optional. Tavily API key for web search. Falls back to DuckDuckGo if absent. |
 
 **Required secrets in the content repo (`herosjourney/startups`):**
 
