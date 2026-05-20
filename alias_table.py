@@ -76,6 +76,9 @@ class AliasTable:
         self._original_keys: dict[str, str] = {k.lower(): k for k in raw_entries}
         self._pending_review: list[dict] = list(data.get("pending_review", []))
 
+        # Check staleness — warn if alias table hasn't been synced in >30 days
+        self._check_staleness()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -195,6 +198,45 @@ class AliasTable:
         """Append *item* to pending_review, avoiding exact duplicates."""
         if item not in self._pending_review:
             self._pending_review.append(item)
+
+    def _check_staleness(self) -> None:
+        """Log a warning if the alias table hasn't been synced in >30 days.
+
+        This fires at startup so scan runs surface the warning in logs
+        before any model ID verification happens.
+        """
+        if not self._last_synced:
+            logger.warning(
+                "AliasTable: last_synced is not set — alias table may be stale. "
+                "Run sync_from_bedrock_lifecycle() to update it."
+            )
+            return
+
+        try:
+            last_synced_dt = datetime.fromisoformat(self._last_synced)
+            if last_synced_dt.tzinfo is None:
+                last_synced_dt = last_synced_dt.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - last_synced_dt).days
+            if age_days > 30:
+                logger.warning(
+                    "AliasTable: last synced %d days ago (%s). "
+                    "Bedrock model IDs may be stale — model_id verification accuracy reduced. "
+                    "The table is auto-synced from Bedrock lifecycle data on each scheduled scan.",
+                    age_days,
+                    self._last_synced,
+                )
+            else:
+                logger.debug(
+                    "AliasTable: last synced %d days ago (%s) — within 30-day freshness window.",
+                    age_days,
+                    self._last_synced,
+                )
+        except (ValueError, TypeError) as exc:
+            logger.warning(
+                "AliasTable: could not parse last_synced=%r: %s",
+                self._last_synced,
+                exc,
+            )
 
 
 def _utc_now() -> str:

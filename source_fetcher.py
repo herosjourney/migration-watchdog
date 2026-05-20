@@ -74,6 +74,9 @@ BEDROCK_LIFECYCLE_URL = (
 # AWS blogs and What's New URLs
 AWS_BLOGS_URL = "https://aws.amazon.com/blogs/"
 AWS_WHATS_NEW_URL = "https://aws.amazon.com/new/"
+# AWS What's New RSS feed — structured events with title, date, link, description
+# Much more reliable than HTML scraping for detecting new GA/preview announcements
+AWS_WHATS_NEW_RSS_URL = "https://aws.amazon.com/about-aws/whats-new/recent/feed/"
 
 # GCP documentation URLs for verifying GCP-side claims in the migration plugin
 GCP_DOC_URLS: dict[str, str] = {
@@ -675,9 +678,8 @@ class SourceFetcher:
     ) -> tuple[list[dict], list[dict]]:
         """Fetch recent posts from AWS blogs and What's New.
 
-        Fetches the main blog and What's New pages, extracts text, and
-        returns posts relevant to compute, database, storage, AI migration,
-        Bedrock Agents, AgentCore, Strands SDK, and startup migration.
+        What's New uses the official RSS feed for structured, reliable event data.
+        Blogs use HTML scraping with keyword filtering as before.
 
         Returns:
             A tuple of (blog_posts, whats_new_posts), each a list of dicts
@@ -686,7 +688,7 @@ class SourceFetcher:
         blog_posts: list[dict] = []
         whats_new_posts: list[dict] = []
 
-        # Fetch blogs page
+        # Fetch blogs page (HTML scraping — less critical, keep as-is)
         try:
             html = await self._fetch_url(AWS_BLOGS_URL)
             blog_posts = self._parse_blog_entries(html, AWS_BLOGS_URL)
@@ -694,15 +696,93 @@ class SourceFetcher:
             logger.warning("Failed to fetch AWS blogs: %s", exc)
             self._record_failure("aws_blogs", exc)
 
-        # Fetch What's New page
+        # Fetch What's New via RSS feed — structured and reliable
         try:
-            html = await self._fetch_url(AWS_WHATS_NEW_URL)
-            whats_new_posts = self._parse_blog_entries(html, AWS_WHATS_NEW_URL)
+            rss_content = await self._fetch_url(AWS_WHATS_NEW_RSS_URL)
+            whats_new_posts = self._parse_whats_new_rss(rss_content)
+            logger.info("Parsed %d What's New entries from RSS feed", len(whats_new_posts))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to fetch AWS What's New: %s", exc)
-            self._record_failure("aws_whats_new", exc)
+            logger.warning("Failed to fetch What's New RSS: %s — falling back to HTML", exc)
+            self._record_failure("aws_whats_new_rss", exc)
+            # Fallback to HTML scraping
+            try:
+                html = await self._fetch_url(AWS_WHATS_NEW_URL)
+                whats_new_posts = self._parse_blog_entries(html, AWS_WHATS_NEW_URL)
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("Failed to fetch AWS What's New HTML fallback: %s", exc2)
+                self._record_failure("aws_whats_new", exc2)
 
         return blog_posts, whats_new_posts
+
+    def _parse_whats_new_rss(self, rss_content: str) -> list[dict]:
+        """Parse AWS What's New RSS feed into structured event dicts.
+
+        Returns entries with keys: title, url, date, summary, service, status.
+        Filters for startup-relevant keywords. Extracts service name and
+        GA/preview status from the title when possible.
+        """
+        import xml.etree.ElementTree as ET
+
+        entries: list[dict] = []
+        try:
+            root = ET.fromstring(rss_content)
+        except ET.ParseError as exc:
+            logger.warning("Failed to parse What's New RSS XML: %s", exc)
+            return entries
+
+        # RSS 2.0: items are under channel/item
+        channel = root.find("channel")
+        if channel is None:
+            return entries
+
+        for item in channel.findall("item"):
+            title_el = item.find("title")
+            link_el = item.find("link")
+            pub_date_el = item.find("pubDate")
+            desc_el = item.find("description")
+
+            title = title_el.text.strip() if title_el is not None and title_el.text else ""
+            url = link_el.text.strip() if link_el is not None and link_el.text else ""
+            pub_date = pub_date_el.text.strip() if pub_date_el is not None and pub_date_el.text else ""
+            description = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
+
+            if not title:
+                continue
+
+            # Filter for startup-relevant keywords
+            combined = (title + " " + description).lower()
+            if not any(kw in combined for kw in RELEVANCE_KEYWORDS):
+                continue
+
+            # Extract GA/preview status from title
+            title_lower = title.lower()
+            status = "unknown"
+            if any(s in title_lower for s in ["generally available", " ga ", "now available"]):
+                status = "ga"
+            elif any(s in title_lower for s in ["preview", "public preview", "limited preview"]):
+                status = "preview"
+            elif "deprecated" in title_lower or "end of support" in title_lower:
+                status = "deprecated"
+
+            # Normalize date to YYYY-MM-DD
+            date_str = pub_date
+            try:
+                from email.utils import parsedate_to_datetime
+                dt = parsedate_to_datetime(pub_date)
+                date_str = dt.strftime("%Y-%m-%d")
+            except Exception:
+                date_str = pub_date[:10] if pub_date else ""
+
+            entries.append({
+                "title": title,
+                "url": url,
+                "date": date_str,
+                "summary": description[:500],
+                "status": status,
+                "source": "whats_new_rss",
+            })
+
+        return entries
 
     def _parse_blog_entries(
         self, html: str, base_url: str
