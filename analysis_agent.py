@@ -310,15 +310,27 @@ def check_new_content_opportunities(
 
 @tool
 def web_search(query: str) -> str:
-    """Search the web for current information using Tavily.
+    """Search the web for current information using Tavily (or DuckDuckGo fallback).
 
-    Use this tool when pre-fetched authoritative data is insufficient to
-    confirm or deny a discrepancy, or to find framework compatibility issues
-    not in official docs (e.g., LangChain/Bedrock gotchas, GitHub issues).
+    IMPORTANT: Only call this tool AFTER search_aws_docs has returned insufficient data.
+    This tool is appropriate ONLY for:
+    - Framework compatibility issues (LangChain/Bedrock, CrewAI, AutoGen, LangGraph gotchas)
+    - Retarget migration pain points not in official AWS docs
+    - Third-party library release notes and GitHub issues
+    - guidance_update topics where AWS docs don't cover the specific issue
+
+    Do NOT use this tool for:
+    - Pricing, regions, model IDs, EOL dates (use search_aws_docs + currency verifier)
+    - Security best practices (use search_aws_docs)
+    - Preview/GA status of AWS services (use search_aws_docs)
+    - Any claim that will be cited as the sole source in a finding
+
+    Results from this tool are "supporting context" only. Any finding created after
+    using this tool MUST also include at least one docs.aws.amazon.com URL.
 
     Args:
-        query: Search query string (e.g., "LangChain ChatBedrock tool calling issues 2025",
-               "Bedrock AgentCore latest features",
+        query: Search query — use for framework compatibility and retarget topics only
+               (e.g., "LangChain ChatBedrock tool calling issues 2025",
                "CrewAI hierarchical process Bedrock model compatibility")
 
     Returns:
@@ -359,6 +371,14 @@ def web_search(query: str) -> str:
             logger.warning("Tavily search failed for query '%s': %s — falling back to DuckDuckGo", query, exc)
 
     # Fallback: DuckDuckGo HTML scraping
+    # Note: only used when TAVILY_API_KEY is not set (local dev / CI without key).
+    # In CI without Tavily, return empty results rather than flaky HTML scraping
+    # to avoid non-deterministic test failures and rate-limit errors.
+    import os as _os2
+    if _os2.environ.get("CI") or _os2.environ.get("GITHUB_ACTIONS"):
+        logger.debug("web_search: no Tavily key in CI environment, returning empty results")
+        return json.dumps({"query": query, "results": [], "note": "No TAVILY_API_KEY set in CI — web search skipped"})
+
     try:
         url = "https://html.duckduckgo.com/html/"
         with httpx.Client(timeout=15.0) as client:
@@ -827,6 +847,11 @@ training knowledge as a source of truth.
 supports the discrepancy. If you cannot cite a source, do NOT create the finding.
 - If no authoritative data was fetched for a topic and all search tools return no relevant \
 results, SKIP that topic entirely rather than guessing from training data.
+- TOOL PRIORITY: Always call search_aws_docs FIRST. Only call web_search AFTER search_aws_docs \
+returns insufficient data. web_search is for framework compatibility issues and retarget topics \
+only — never for pricing, regions, model IDs, EOL dates, or security best practices.
+- web_search results are "supporting context" only. Any finding that uses web_search results \
+MUST also include at least one docs.aws.amazon.com or aws.amazon.com URL as the primary citation.
 - When in doubt, use search_aws_docs or web_search to verify before creating a finding.
 - Be thorough but precise. Only create findings for genuine discrepancies backed by cited data."""
 
