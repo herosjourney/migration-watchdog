@@ -163,6 +163,14 @@ class LLMSecurityScanner:
         "security",
         "design-infra",
         "baseline",
+        # Design reference files — contain actual migration guidance startups follow
+        "design-ref",
+        "ai-migration-guardrails",
+        "design-ref-agentic",
+        "design-ref-harness",
+        "design-ref-networking",
+        "design-ref-compute",
+        "design-ref-database",
     ]
 
     def __init__(

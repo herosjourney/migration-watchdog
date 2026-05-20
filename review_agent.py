@@ -347,15 +347,18 @@ def _parse_review_result(agent_result: object, finding: Finding) -> ReviewResult
             corrected_changes = parsed.get("corrected_changes")
             reviewer_notes = parsed.get("reviewer_notes", result_text)
     except (json.JSONDecodeError, ValueError):
-        # If we can't parse JSON, treat the whole response as reviewer notes
+        # If we can't parse JSON, default to unverified (not confirmed) to avoid
+        # inflating false positives — a failed review should not count as confirmation
+        review_status = "unverified"
         logger.warning(
-            "Could not parse review agent response as JSON for finding %s",
+            "Could not parse review agent response as JSON for finding %s; "
+            "defaulting to unverified to avoid false confirmation",
             finding.finding_id,
         )
 
     # Validate review_status is one of the expected values
-    if review_status not in ("confirmed", "corrected", "disputed"):
-        review_status = "confirmed"
+    if review_status not in ("confirmed", "corrected", "disputed", "unverified"):
+        review_status = "unverified"
 
     return ReviewResult(
         finding_id=finding.finding_id,

@@ -116,6 +116,24 @@ RELEVANCE_KEYWORDS: list[str] = [
     "harness",
     "performance loop",
     "evaluations",
+    # Startup-relevant infra services
+    "app runner",
+    "lightsail",
+    "elasticache serverless",
+    "aurora serverless",
+    "opensearch serverless",
+    "step functions",
+    "eventbridge",
+    # AI/ML services
+    "bedrock guardrails",
+    "knowledge base",
+    "data automation",
+    "bedrock agents",
+    # Cost optimization
+    "graviton",
+    "savings plans",
+    "compute optimizer",
+    "free tier",
 ]
 
 # AWS Pricing API service codes
