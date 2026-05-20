@@ -42,10 +42,15 @@ def _should_include_in_pr_comment(finding: Finding, severity_threshold: str) -> 
 
     Rules:
     - Always include: correctness, outdated
+    - Always include: security findings at HIGH risk (regardless of threshold)
     - Include when threshold="low": also policy_change
     - Never include: informational
     - For automation findings (category="automation_gap"): include when gap_type != "no_gap"
     """
+    # Security HIGH findings always appear in PR comments — startups must see these
+    if finding.category == "security" and finding.risk_level == RiskLevel.HIGH:
+        return True
+
     # Automation findings: include when gap_type is not no_gap
     if finding.category == "automation_gap":
         gap_type = (finding.auditor_payload or {}).get("gap_type", "full_gap")

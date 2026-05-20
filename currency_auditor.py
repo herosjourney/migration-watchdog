@@ -1776,12 +1776,18 @@ async def run_currency_audit(
         alias_table.sync_from_bedrock_lifecycle(authoritative_data.bedrock_lifecycle)
 
     # Parse pricing cache once (reused for all files).
-    # Try the full repo path first (scheduled runs via RepoScanner),
-    # then fall back to the bare filename (PR checkout mode).
-    _PRICING_CACHE_PATH = "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md"
-    pricing_cache_content = (
-        repo_content.files.get(_PRICING_CACHE_PATH)
-        or repo_content.files.get("pricing-cache.md", "")
+    # Try multiple path variants to handle repo restructuring:
+    # - migrate/plugins/... (current actual path)
+    # - features/migration-to-aws/... (legacy path, may still appear in some runs)
+    # - bare filename (PR checkout mode)
+    _PRICING_CACHE_PATHS = [
+        "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md",
+        "features/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md",
+        "pricing-cache.md",
+    ]
+    pricing_cache_content = next(
+        (repo_content.files[p] for p in _PRICING_CACHE_PATHS if p in repo_content.files),
+        "",
     )
     pricing_cache_entries = parse_pricing_cache(pricing_cache_content) if pricing_cache_content else []
 

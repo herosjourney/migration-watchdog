@@ -622,6 +622,34 @@ def create_finding(
             }
         )
 
+    # For security and analysis findings, require at least one official AWS domain URL.
+    # This prevents hallucinated sources and ensures findings are grounded in real docs.
+    _OFFICIAL_AWS_DOMAINS = (
+        "docs.aws.amazon.com",
+        "aws.amazon.com/about-aws/whats-new",
+        "aws.amazon.com/blogs",
+        "aws.amazon.com/premiumsupport",
+        "repost.aws",
+        "docs.aws.amazon.com",
+    )
+    if category in ("security", "guidance_update", "new_content", "structural", "core_removal"):
+        has_official_url = any(
+            any(domain in url for domain in _OFFICIAL_AWS_DOMAINS)
+            for url in urls_list
+        )
+        if not has_official_url:
+            return json.dumps(
+                {
+                    "error": (
+                        f"Finding rejected: {category} findings require at least one official AWS URL "
+                        f"(docs.aws.amazon.com, aws.amazon.com/about-aws/whats-new, etc.). "
+                        f"Use search_aws_docs to find an authoritative source before creating this finding. "
+                        f"Provided URLs: {urls_list}"
+                    ),
+                    "created": False,
+                }
+            )
+
     risk_level = classify_risk(category)
     finding_id = str(uuid4())
     scan_timestamp = datetime.utcnow().isoformat()
