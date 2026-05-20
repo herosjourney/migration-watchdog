@@ -160,6 +160,14 @@ async def run_scan(_source_fetcher=None) -> None:
                         files[rel_path] = _f.read()
                 except OSError as exc:
                     logger.warning("Could not read %s: %s", file_path, exc)
+
+            # Also normalize config.changed_files for use as file_filter later —
+            # currency/automation use exact key match against repo_content.files,
+            # so file_filter must use the same relative path keys.
+            _normalized_changed_files = [
+                os.path.relpath(f, _cwd) if os.path.isabs(f) else f
+                for f in config.changed_files
+            ]
             # Always merge shared artifacts needed for full audit coverage:
             # pricing-cache.md (for price claim verification) and any referenced
             # generated_artifact scripts (for gap assessment).
@@ -274,11 +282,24 @@ async def run_scan(_source_fetcher=None) -> None:
         # failures can be appended before step 7 defines it.
         partial_source_failures: list[str] = list(authoritative_data.partial_failures)
 
+        # Normalize file_filter for PR runs — ensure relative paths match repo_content.files keys
+        # For scheduled runs this is None (scan all files).
+        if config.trigger_type == "pull_request":
+            try:
+                _normalized_changed_files
+            except NameError:
+                # Scheduled path or App-credential PR path — normalize from config
+                _cwd2 = os.getcwd()
+                _normalized_changed_files = [
+                    os.path.relpath(f, _cwd2) if os.path.isabs(f) else f
+                    for f in config.changed_files
+                ]
+
         currency_findings: list[Finding] = []
         try:
             currency_findings = await run_currency_audit(
                 repo_content, authoritative_data, run_id,
-                file_filter=config.changed_files if config.trigger_type == "pull_request" else None,
+                file_filter=_normalized_changed_files if config.trigger_type == "pull_request" else None,
             )
             logger.info("Currency audit produced %d findings", len(currency_findings))
         except ValueError as exc:
@@ -305,7 +326,7 @@ async def run_scan(_source_fetcher=None) -> None:
         try:
             automation_findings = await run_automation_audit(
                 repo_content, authoritative_data, run_id,
-                file_filter=config.changed_files if config.trigger_type == "pull_request" else None,
+                file_filter=_normalized_changed_files if config.trigger_type == "pull_request" else None,
             )
             logger.info("Automation audit produced %d findings", len(automation_findings))
         except ValueError as exc:
@@ -324,7 +345,7 @@ async def run_scan(_source_fetcher=None) -> None:
         try:
             security_findings = await run_security_audit(
                 repo_content, run_id,
-                file_filter=config.changed_files if config.trigger_type == "pull_request" else None,
+                file_filter=_normalized_changed_files if config.trigger_type == "pull_request" else None,
             )
             logger.info("Security audit produced %d findings", len(security_findings))
         except Exception as exc:
@@ -368,20 +389,23 @@ async def run_scan(_source_fetcher=None) -> None:
             len(all_deduped),
         )
 
-        # 6. Review medium/high currency findings only
-        logger.info("Reviewing medium/high currency findings …")
-        currency_for_review = [
+        # 6. Review medium/high currency findings AND security HIGH findings
+        # review_agent.py already handles both categories in should_review logic;
+        # main.py was incorrectly filtering to currency_drift only.
+        logger.info("Reviewing medium/high currency findings and security HIGH findings …")
+        findings_for_review = [
             f for f in all_deduped
-            if f.category == "currency_drift"
-            and f.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH)
+            if (f.category == "currency_drift" and f.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH))
+            or (f.category == "security" and f.risk_level == RiskLevel.HIGH)
         ]
         other_findings = [
             f for f in all_deduped
-            if not (f.category == "currency_drift" and f.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH))
+            if f not in findings_for_review
         ]
-        reviewed_currency = review_findings(currency_for_review, authoritative_data)
-        reviewed_findings = reviewed_currency + other_findings
-        logger.info("Review complete: %d findings", len(reviewed_findings))
+        reviewed_batch = review_findings(findings_for_review, authoritative_data)
+        reviewed_findings = reviewed_batch + other_findings
+        logger.info("Review complete: %d findings (%d reviewed, %d passed through)",
+                    len(reviewed_findings), len(findings_for_review), len(other_findings))
 
         # 7. Persist findings
         logger.info("Persisting %d findings …", len(reviewed_findings))
