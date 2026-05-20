@@ -310,21 +310,56 @@ def check_new_content_opportunities(
 
 @tool
 def web_search(query: str) -> str:
-    """Search the web for current information to verify claims or find updates.
+    """Search the web for current information using Tavily.
 
     Use this tool when pre-fetched authoritative data is insufficient to
-    confirm or deny a discrepancy. Always prefer pre-fetched data first;
-    use web search only to fill gaps or verify uncertain claims.
+    confirm or deny a discrepancy, or to find framework compatibility issues
+    not in official docs (e.g., LangChain/Bedrock gotchas, GitHub issues).
 
     Args:
-        query: Search query string (e.g., "AWS ECS Fargate pricing 2026",
-               "Bedrock AgentCore latest features")
+        query: Search query string (e.g., "LangChain ChatBedrock tool calling issues 2025",
+               "Bedrock AgentCore latest features",
+               "CrewAI hierarchical process Bedrock model compatibility")
 
     Returns:
-        JSON string of search results with titles, URLs, and snippets
+        JSON string of search results with titles, URLs, and content snippets
     """
+    import os as _os
+    tavily_api_key = _os.environ.get("TAVILY_API_KEY", "")
+
+    if tavily_api_key:
+        # Use Tavily API for reliable, structured results
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": tavily_api_key,
+                        "query": query,
+                        "search_depth": "basic",
+                        "max_results": 5,
+                        "include_answer": False,
+                        "include_raw_content": False,
+                        "days": 180,  # Last 6 months for recency
+                    },
+                    headers={"Content-Type": "application/json"},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    results = [
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("url", ""),
+                            "snippet": r.get("content", "")[:400],
+                        }
+                        for r in data.get("results", [])
+                    ]
+                    return json.dumps({"query": query, "results": results})
+        except Exception as exc:
+            logger.warning("Tavily search failed for query '%s': %s — falling back to DuckDuckGo", query, exc)
+
+    # Fallback: DuckDuckGo HTML scraping
     try:
-        # Use DuckDuckGo HTML search as a simple web search approach
         url = "https://html.duckduckgo.com/html/"
         with httpx.Client(timeout=15.0) as client:
             response = client.post(
@@ -334,13 +369,10 @@ def web_search(query: str) -> str:
             )
             response.raise_for_status()
 
-        # Parse basic results from the HTML response
         results: list[dict] = []
         html = response.text
-        # Simple extraction of result snippets from DuckDuckGo HTML
         import re
 
-        # Find result blocks
         result_blocks = re.findall(
             r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
             r'class="result__snippet"[^>]*>(.*?)</span>',
@@ -348,23 +380,14 @@ def web_search(query: str) -> str:
             re.DOTALL,
         )
         for href, title_html, snippet_html in result_blocks[:5]:
-            # Strip HTML tags
             title = re.sub(r"<[^>]+>", "", title_html).strip()
             snippet = re.sub(r"<[^>]+>", "", snippet_html).strip()
-            results.append(
-                {"title": title, "url": href, "snippet": snippet}
-            )
+            results.append({"title": title, "url": href, "snippet": snippet})
 
         return json.dumps({"query": query, "results": results})
     except Exception as exc:
         logger.warning("Web search failed for query '%s': %s", query, exc)
-        return json.dumps(
-            {
-                "query": query,
-                "results": [],
-                "error": f"Search failed: {exc}",
-            }
-        )
+        return json.dumps({"query": query, "results": [], "error": f"Search failed: {exc}"})
 
 
 @tool
