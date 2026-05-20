@@ -690,6 +690,18 @@ ANALYSIS_SYSTEM_PROMPT = """You are the Migration Plugin Watchdog Analysis Agent
 compare the contents of the aws-samples/sample-agent-skills-for-aws-migration GitHub repository \
 against current authoritative sources and identify outdated, stale, or missing content.
 
+CANONICAL FILE PATH PREFIX:
+All reference files in the migration plugin use the path prefix:
+  migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/
+NOT the old prefix features/migration-to-aws/...
+When referencing files in findings or proposed changes, always use the migrate/ prefix.
+Key paths:
+  migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/pricing-cache.md
+  migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/shared/ai-migration-guardrails.md
+  migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/design-refs/
+  migrate/plugins/migration-to-aws/skills/gcp-to-aws/references/phases/
+  migrate/plugins/migration-to-aws/skills/gcp-to-aws/SKILL.md
+
 You will be given:
 1. The current repo content (markdown files from the migration plugin)
 2. Current authoritative data (AWS docs, pricing, Gemini/OpenAI model data, blog posts)
@@ -1128,19 +1140,33 @@ def _build_new_content_prompt(
     sections.append("")
 
     # If fewer than 10 files are loaded, this is a PR-triggered run with limited context.
-    # Suppress new_content findings to avoid false "missing coverage" claims.
+    # Instead of blanket suppression, allow a curated watchlist of critical topics
+    # that are always checked even on small PR runs using pre-fetched data.
+    _PR_WATCHLIST = [
+        "Bedrock Mantle 10,000 RPM shared account limit",
+        "AgentCore Harness preview status and 4-region availability (us-east-1, us-west-2, eu-central-1, ap-southeast-2)",
+        "gpt-oss models on Bedrock as a migration path option",
+        "max_tokens reservation trap (Bedrock deducts at request start)",
+        "Bedrock Mantle Responses API for Assistants API migration",
+    ]
     if file_count < 10:
         sections.append(
             "**NOTE: Only a small subset of repository files are loaded (PR-triggered run). "
-            "Do NOT create 'new_content' or 'missing coverage' findings — you cannot see the "
-            "full repository and would produce false positives. Skip this analysis entirely.**\n"
+            "Do NOT create general 'new_content' or 'missing coverage' findings — you cannot see the "
+            "full repository and would produce false positives.**\n"
         )
         sections.append(
-            "\n## Instructions\n"
-            "This is a PR-triggered run with limited file context. "
-            "Do NOT create any new_content findings. Return without creating any findings."
+            "\n## PR-Mode Watchlist\n"
+            "Even on PR runs, always check these critical topics using search_aws_docs "
+            "and the pre-fetched authoritative data. Create findings ONLY if the changed "
+            "files contain claims about these topics that are wrong or missing:\n"
         )
-        return "\n".join(sections)
+        for item in _PR_WATCHLIST:
+            sections.append(f"- {item}")
+        sections.append(
+            "\nFor all other new_content checks, skip them on this PR run. "
+            "Return without creating findings for topics not in the watchlist above.\n"
+        )
 
     # Include AI-related file content snippets so the agent can see what's covered
     sections.append("### Current AI/Agent Coverage in Repo\n")

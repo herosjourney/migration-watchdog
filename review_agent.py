@@ -443,10 +443,14 @@ def review_findings(
     for finding in findings:
         # Review medium/high-risk findings AND all model_deprecation findings
         # (model_deprecation findings are often low-risk but prone to false positives
-        # from self-aware files that recompute their own status on each run)
+        # from self-aware files that recompute their own status on each run).
+        # Also review security HIGH findings — LLM-generated security findings can
+        # hallucinate; an independent review catches false positives before they
+        # reach the dashboard and alarm startups unnecessarily.
         should_review = (
             finding.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH)
             or finding.category in ("model_deprecation", "new_model")
+            or (finding.category == "security" and finding.risk_level == RiskLevel.HIGH)
         )
         if should_review:
             logger.info(
