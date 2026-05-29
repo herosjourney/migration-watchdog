@@ -32,6 +32,9 @@ cryptography>=43.0.0
 # Date math for dismissal cooldown calculations (dismissed_at + 2 months)
 python-dateutil>=2.9.0
 
+# YAML parsing for persona library (personas.yaml)
+pyyaml>=6.0.0
+
 # --- Dev/test dependencies ---
 
 # Property-based testing framework for universal correctness properties

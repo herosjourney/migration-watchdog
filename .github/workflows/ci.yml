@@ -47,3 +47,17 @@ jobs:
         # (which need the real package).
         run: |
           pytest migration_watchdog/tests/ --forked -v --tb=short
+
+  validate-personas:
+    name: Validate personas.yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install pyyaml
+      - name: Validate personas.yaml schema
+        run: python -m pytest tests/test_persona_library.py -v -k "production_personas"
+        working-directory: migration_watchdog
