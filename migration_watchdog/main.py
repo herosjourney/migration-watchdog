@@ -639,6 +639,22 @@ async def run_scan() -> None:
                 f"automation_audit_error: {exc}"
             )
 
+        # 4c. Run scenario simulation audit (NEW)
+        from migration_watchdog.scenario_auditor import run_scenario_audit
+        scenario_findings: list[Finding] = []
+        try:
+            scenario_findings = await run_scenario_audit(
+                repo_content=repo_content,
+                run_id=run_id,
+                changed_files=audited_files if trigger_type == "pull_request" else None,
+            )
+            logger.info("Scenario audit: %d findings", len(scenario_findings))
+        except Exception as exc:
+            logger.exception("Scenario audit failed: %s", exc)
+            authoritative_data.partial_failures.append(
+                f"scenario_audit_error: {exc}"
+            )
+
         # 5. Deduplicate findings with per-category keys
         logger.info("Deduplicating findings …")
         existing_findings = findings_repo.list_findings(exclude_dismissed=False) if _has_aws_credentials else []
@@ -658,12 +674,18 @@ async def run_scan() -> None:
             dedupe_key_fn=automation_dedupe_key,
         )
 
-        all_deduped = deduped_analysis + deduped_currency + deduped_automation
+        # Scenario findings use default key (finding_id is deterministic SHA-256)
+        deduped_scenario = deduplicate(
+            scenario_findings, repo_content.open_prs, existing_findings,
+        )
+
+        all_deduped = deduped_analysis + deduped_currency + deduped_automation + deduped_scenario
         logger.info(
-            "Deduplication: analysis=%d, currency=%d, automation=%d -> total=%d findings",
+            "Deduplication: analysis=%d, currency=%d, automation=%d, scenario=%d -> total=%d findings",
             len(deduped_analysis),
             len(deduped_currency),
             len(deduped_automation),
+            len(deduped_scenario),
             len(all_deduped),
         )
 

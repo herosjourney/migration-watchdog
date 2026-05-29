@@ -1,0 +1,506 @@
+# Scenario Simulation Agent — Persona Library
+# 12 personas covering the real distribution of migration plugin users.
+# Each persona anchors a regression test for a specific routing/coverage path.
+# Personas 6–8 are anchored to PR #30 (Anthropic + gateway routing fixes).
+
+- id: gcp-infra-only
+  description: >
+    Startup running Cloud Run + Cloud SQL (PostgreSQL) on GCP with Terraform.
+    No AI/LLM workloads. Pure infrastructure migration path.
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - compute.md
+      - database.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-infra-openai-direct
+  description: >
+    Startup running Cloud Run + Cloud SQL on GCP with Terraform, using OpenAI
+    GPT-4o via the direct Python SDK. No agentic framework.
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks: []
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - ai-workload-profile.json
+    clarify_route: clarify-global+clarify-ai
+    design_route: design-infra+design-ai
+    design_refs:
+      - compute.md
+      - database.md
+      - ai-openai-to-bedrock.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-infra-langchain-openai
+  description: >
+    Startup running Cloud Run + Cloud SQL on GCP with Terraform, using LangChain
+    with OpenAI as the underlying provider. Not agentic (no LangGraph).
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks:
+      - langchain
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - ai-workload-profile.json
+    clarify_route: clarify-global+clarify-ai
+    design_route: design-infra+design-ai
+    design_refs:
+      - compute.md
+      - database.md
+      - ai-openai-to-bedrock.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-infra-langgraph-openai-agentic
+  description: >
+    Startup running Cloud Run + Cloud SQL on GCP with Terraform, using LangGraph
+    with OpenAI. IS agentic with graph-based orchestration. Exercises the
+    agentic-to-AgentCore migration path.
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks:
+      - langgraph
+      - langchain
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: true
+    framework: langgraph
+    tools: []
+    orchestration_pattern: graph
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - ai-workload-profile.json
+    clarify_route: clarify-global+clarify-ai
+    design_route: design-infra+design-ai
+    design_refs:
+      - compute.md
+      - database.md
+      - ai-openai-to-bedrock.md
+      - design-ref-agentic-to-agentcore.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-infra-gemini-direct
+  description: >
+    Startup running Cloud Run + Cloud SQL on GCP with Terraform, using Gemini
+    2.5 Flash via the direct Google AI SDK. No agentic framework.
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: gemini
+    models:
+      - gemini-2.5-flash
+    frameworks: []
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - ai-workload-profile.json
+    clarify_route: clarify-global+clarify-ai
+    design_route: design-infra+design-ai
+    design_refs:
+      - compute.md
+      - database.md
+      - ai-gemini-to-bedrock.md
+  known_gaps_fixed_by_prs: []
+
+- id: ai-only-anthropic-sdk
+  description: >
+    Startup with NO GCP infrastructure, using the Anthropic SDK directly
+    (claude-3-5-sonnet-20241022). No agentic framework. PR #30 gap persona:
+    Anthropic was previously routed to ai.md (SageMaker rubric) instead of
+    ai-anthropic-to-bedrock.md.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: anthropic
+    models:
+      - claude-3-5-sonnet-20241022
+    frameworks: []
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-anthropic-to-bedrock.md
+  known_gaps_fixed_by_prs:
+    - "PR#30"
+
+- id: ai-only-openrouter-gateway
+  description: >
+    Startup with NO GCP infrastructure, routing LLM calls through OpenRouter
+    (OPENROUTER_API_KEY env var), using GPT-4o via the OpenRouter gateway.
+    No agentic framework. PR #30 gap persona: OpenRouter via env var was not
+    detected and was classified as a direct SDK call.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks: []
+    integration_pattern: llm_router
+    gateway_type: openrouter
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+  known_gaps_fixed_by_prs:
+    - "PR#30"
+
+- id: ai-only-litellm-proxy
+  description: >
+    Startup with NO GCP infrastructure, routing LLM calls through a LiteLLM
+    proxy (LITELLM_API_KEY env var) with multiple models. No agentic framework.
+    PR #30 gap persona: LiteLLM proxy via env var was not detected and was
+    classified as a direct SDK call.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+    frameworks: []
+    integration_pattern: llm_router
+    gateway_type: litellm
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+  known_gaps_fixed_by_prs:
+    - "PR#30"
+
+- id: ai-only-crewai-openai
+  description: >
+    Startup with NO GCP infrastructure, using CrewAI with OpenAI as the
+    underlying provider. IS agentic with hierarchical orchestration (crew of
+    agents with role-based task delegation).
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks:
+      - crewai
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: true
+    framework: crewai
+    tools: []
+    orchestration_pattern: hierarchical
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+      - design-ref-agentic-to-agentcore.md
+  known_gaps_fixed_by_prs: []
+
+- id: ai-only-openai-agents-sdk
+  description: >
+    Startup with NO GCP infrastructure, using the OpenAI Agents SDK directly.
+    IS agentic with sequential orchestration. Represents the highest-effort
+    migration path due to tight coupling to OpenAI's proprietary agent runtime.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks:
+      - openai-agents-sdk
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: true
+    framework: openai-agents-sdk
+    tools: []
+    orchestration_pattern: sequential
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-infra-multi-model
+  description: >
+    Startup running Cloud Run + Cloud SQL on GCP with Terraform, using BOTH
+    OpenAI and Gemini models in the same codebase. No agentic framework.
+    Exercises the multi-provider path where both ai-openai-to-bedrock.md and
+    ai-gemini-to-bedrock.md must be loaded.
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: both
+    models:
+      - gpt-4o
+      - gemini-2.5-flash
+    frameworks: []
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - ai-workload-profile.json
+    clarify_route: clarify-global+clarify-ai
+    design_route: design-infra+design-ai
+    design_refs:
+      - compute.md
+      - database.md
+      - ai-openai-to-bedrock.md
+      - ai-gemini-to-bedrock.md
+  known_gaps_fixed_by_prs: []
+
+- id: billing-data-only
+  description: >
+    Customer who provided only a GCP billing CSV export — no Terraform, no
+    application code. Exercises the billing-only discovery and design path.
+    Tests that the plugin does not crash or misroute when infrastructure and
+    AI signals are absent.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: true
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - billing-profile.json
+    clarify_route: clarify-global
+    design_route: design-billing
+    design_refs:
+      - design-billing.md
+  known_gaps_fixed_by_prs: []
+
+- id: large-database-cloud-sql
+  description: >
+    Startup running Cloud Run + Cloud SQL PostgreSQL (large: >500GB) on GCP with
+    Terraform. No AI/LLM workloads. PR #15 gap: the plugin had no database size
+    question and always recommended pg_dump regardless of size; for >500GB,
+    DMS should be recommended instead.
+  infrastructure:
+    gcp_services:
+      - cloud_run
+      - cloud_sql_postgresql_large
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - compute.md
+      - database.md
+  known_gaps_fixed_by_prs:
+    - "PR#15"
+
+- id: high-volume-openai-mantle
+  description: >
+    Startup with NO GCP infrastructure, using the OpenAI direct SDK at high
+    volume (>1000 RPM). No agentic framework. PR #14 gap: the plugin did not
+    warn about Bedrock Mantle's 10K RPM shared account limit for high-volume
+    workloads.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks: []
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+  known_gaps_fixed_by_prs:
+    - "PR#14"
+
+- id: gke-no-k8s-preference
+  description: >
+    Startup running GKE + Cloud SQL on GCP with Terraform. No AI workloads, no
+    explicit Kubernetes preference stated. PR #14 gap: the plugin defaulted to
+    EKS when no K8s preference was stated, but should default to Fargate.
+  infrastructure:
+    gcp_services:
+      - gke
+      - cloud_sql_postgresql
+    has_terraform: true
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - compute.md
+      - database.md
+  known_gaps_fixed_by_prs:
+    - "PR#14"
