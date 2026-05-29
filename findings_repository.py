@@ -7,13 +7,29 @@ status-based and risk-level-based queries.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from decimal import Decimal
+from datetime import datetime
 
 from boto3.dynamodb.conditions import Attr, Key
 from dateutil.relativedelta import relativedelta
 
 from migration_watchdog.models import Dismissal, Finding, RiskLevel, ScanRun
-from migration_watchdog.utils import has_active_dismissal
+
+
+def _to_dynamodb_safe(obj):
+    """Recursively convert float values to Decimal for DynamoDB compatibility.
+
+    DynamoDB does not support Python float types — all numeric values must be
+    Decimal. This function walks dicts, lists, and nested structures and
+    converts any float it finds.
+    """
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_dynamodb_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_dynamodb_safe(v) for v in obj]
+    return obj
 
 
 class FindingsRepository:
@@ -91,7 +107,7 @@ class FindingsRepository:
         findings = [self._item_to_finding(i) for i in items]
 
         if exclude_dismissed:
-            findings = [f for f in findings if not has_active_dismissal(f)]
+            findings = [f for f in findings if not self._has_active_dismissal(f)]
 
         return findings
 
@@ -103,7 +119,7 @@ class FindingsRepository:
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":s": status,
-                ":u": datetime.now(timezone.utc).isoformat(),
+                ":u": datetime.utcnow().isoformat(),
             },
         )
 
@@ -113,7 +129,7 @@ class FindingsRepository:
 
     def record_dismissal(self, finding_id: str, cooldown_months: int = 2) -> None:
         """Record a dismissal with cooldown expiry timestamp."""
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         cooldown_expires = now + relativedelta(months=cooldown_months)
         dismissed_at = now.isoformat()
         cooldown_expires_iso = cooldown_expires.isoformat()
@@ -138,7 +154,7 @@ class FindingsRepository:
                     "cooldown_expires": cooldown_expires_iso,
                     "reason": None,
                 },
-                ":u": datetime.now(timezone.utc).isoformat(),
+                ":u": datetime.utcnow().isoformat(),
             },
         )
 
@@ -147,7 +163,7 @@ class FindingsRepository:
         finding = self.get_finding(finding_id)
         if finding is None:
             return False
-        return has_active_dismissal(finding)
+        return self._has_active_dismissal(finding)
 
     # ------------------------------------------------------------------ #
     # Scan Runs
@@ -236,10 +252,12 @@ class FindingsRepository:
             item["dismissal"] = None
 
         # New fields: auditor_payload (map) and finding_schema_version (string)
-        item["auditor_payload"] = finding.auditor_payload if finding.auditor_payload is not None else None
+        # Convert floats to Decimal — DynamoDB rejects Python float types.
+        raw_payload = finding.auditor_payload if finding.auditor_payload is not None else None
+        item["auditor_payload"] = _to_dynamodb_safe(raw_payload)
         item["finding_schema_version"] = finding.finding_schema_version
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.utcnow().isoformat()
         item["created_at"] = now_iso
         item["updated_at"] = now_iso
 
@@ -387,22 +405,25 @@ class FindingsRepository:
                 findings.append(f)
 
         if exclude_dismissed:
-            findings = [f for f in findings if not has_active_dismissal(f)]
+            findings = [f for f in findings if not self._has_active_dismissal(f)]
 
         return findings
 
     def _scan_findings(self) -> list[dict]:
-        """Scan the table for all Finding entities, handling DynamoDB pagination."""
-        filter_expr = Attr("SK").eq("FINDING") & Attr("PK").begins_with("FINDING#")
-        items: list[dict] = []
-        kwargs: dict = {"FilterExpression": filter_expr}
+        """Scan the table for all Finding entities."""
+        resp = self._table.scan(
+            FilterExpression=Attr("SK").eq("FINDING")
+            & Attr("PK").begins_with("FINDING#"),
+        )
+        return resp.get("Items", [])
 
-        while True:
-            resp = self._table.scan(**kwargs)
-            items.extend(resp.get("Items", []))
-            last_key = resp.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            kwargs["ExclusiveStartKey"] = last_key
-
-        return items
+    @staticmethod
+    def _has_active_dismissal(finding: Finding) -> bool:
+        """Check if a finding has an active (non-expired) dismissal."""
+        if finding.dismissal is None:
+            return False
+        try:
+            expires = datetime.fromisoformat(finding.dismissal.cooldown_expires)
+            return datetime.utcnow() < expires
+        except (ValueError, TypeError):
+            return False

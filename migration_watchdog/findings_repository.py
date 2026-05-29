@@ -7,12 +7,29 @@ status-based and risk-level-based queries.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from datetime import datetime
 
 from boto3.dynamodb.conditions import Attr, Key
 from dateutil.relativedelta import relativedelta
 
 from migration_watchdog.models import Dismissal, Finding, RiskLevel, ScanRun
+
+
+def _to_dynamodb_safe(obj):
+    """Recursively convert float values to Decimal for DynamoDB compatibility.
+
+    DynamoDB does not support Python float types — all numeric values must be
+    Decimal. This function walks dicts, lists, and nested structures and
+    converts any float it finds.
+    """
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_dynamodb_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_dynamodb_safe(v) for v in obj]
+    return obj
 
 
 class FindingsRepository:
@@ -235,7 +252,9 @@ class FindingsRepository:
             item["dismissal"] = None
 
         # New fields: auditor_payload (map) and finding_schema_version (string)
-        item["auditor_payload"] = finding.auditor_payload if finding.auditor_payload is not None else None
+        # Convert floats to Decimal — DynamoDB rejects Python float types.
+        raw_payload = finding.auditor_payload if finding.auditor_payload is not None else None
+        item["auditor_payload"] = _to_dynamodb_safe(raw_payload)
         item["finding_schema_version"] = finding.finding_schema_version
 
         now_iso = datetime.utcnow().isoformat()
