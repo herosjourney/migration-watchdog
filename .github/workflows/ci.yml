@@ -57,7 +57,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install pyyaml pytest
       - name: Validate personas.yaml schema
         run: python -m pytest tests/test_persona_library.py -v -k "production_personas"
         working-directory: migration_watchdog
