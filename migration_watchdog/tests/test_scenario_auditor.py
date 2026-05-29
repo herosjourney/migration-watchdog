@@ -14,7 +14,7 @@ from migration_watchdog.coverage_assessor import CoverageAssessor, CoverageResul
 from migration_watchdog.models import RepoContent, RiskLevel
 from migration_watchdog.scenario_auditor import run_scenario_audit
 
-PERSONAS_YAML = Path(__file__).parent.parent / "migration_watchdog" / "personas.yaml"
+PERSONAS_YAML = Path(__file__).parent.parent / "personas.yaml"
 
 
 def make_empty_repo():

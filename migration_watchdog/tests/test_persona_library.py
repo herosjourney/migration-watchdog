@@ -402,7 +402,7 @@ def test_get_all_raises_before_load():
 
 from pathlib import Path
 
-PERSONAS_YAML_PATH = Path(__file__).parent.parent / "migration_watchdog" / "personas.yaml"
+PERSONAS_YAML_PATH = Path(__file__).parent.parent / "personas.yaml"
 
 EXPECTED_PERSONA_IDS = [
     "gcp-infra-only",
