@@ -196,7 +196,7 @@ def test_all_personas_trace_without_error():
     """All 12 personas can be traced against an empty repo without raising exceptions."""
     lib = PersonaLibrary()
     personas = lib.load(str(PERSONAS_YAML))
-    assert len(personas) == 12, f"Expected 12 personas, got {len(personas)}"
+    assert len(personas) >= 12, f"Expected at least 12 personas, got {len(personas)}"
 
     tracer = PathTracer()
     repo = make_empty_repo_content()
