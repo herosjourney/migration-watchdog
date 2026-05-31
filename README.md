@@ -3,7 +3,7 @@
 Automated quality assurance for the GCP-to-AWS migration plugin at
 [awslabs/startups/migrate](https://github.com/awslabs/startups/tree/main/migrate).
 Keeps migration guidance accurate and progressively more automated by running
-four AI agents on every pull request and on a weekly schedule.
+six AI agents on every pull request and on a weekly schedule.
 
 ---
 
@@ -65,9 +65,11 @@ GitHub PR / weekly cron
         │
         ├── Analysis Agent ──────────────────────────────────────────────┐
         ├── Currency Auditor ────────────────────────────────────────────┤
-        └── Automation Auditor ──────────────────────────────────────────┤
-                                                                         │
-        ┌────────────────────────────────────────────────────────────────┘
+        ├── Automation Auditor ──────────────────────────────────────────┤
+        ├── Security Auditor ──────────────────────────────────────────── ┤
+        └── Scenario Simulation Agent ───────────────────────────────────┤
+                                                                          │
+        ┌─────────────────────────────────────────────────────────────────┘
         │
         ├── Deduplication (per-category key functions)
         ├── Review Agent — quality-checks medium/high currency findings
@@ -78,7 +80,7 @@ GitHub PR / weekly cron
 
 ---
 
-## The four agents
+## The six agents
 
 ### 1. Analysis Agent
 
@@ -189,7 +191,7 @@ are skipped with a warning.
   verified deterministically.
 - Quarter-format dates (Q1/Q2 YYYY) are skipped as unverifiable.
 - Each claim verification takes 5–15 seconds. A file with 20 claims takes
-  roughly 2–5 minutes. Claims are verified sequentially (not in parallel).
+  roughly 2–5 minutes. Claims are verified concurrently via `asyncio.gather`.
 
 ---
 
@@ -252,6 +254,39 @@ and find authoritative source URLs before flagging issues.
 
 ---
 
+### 6. Scenario Simulation Agent
+
+**Model:** Claude Opus 4.7 (`us.anthropic.claude-opus-4-7`) via Amazon Bedrock
+
+**Purpose:** Simulates 25 startup personas through the migration plugin's state machine to detect routing errors and coverage gaps before they reach users. Unlike the other auditors which check reference file content, the Scenario Simulation Agent checks whether the plugin's *routing logic* correctly handles the full range of startup profiles it will encounter.
+
+**Components:**
+- `PersonaLibrary` — loads 25 startup personas from `personas.yaml`, covering GCP infrastructure migrations, AI-only migrations, agentic framework migrations, and edge cases
+- `PathTracer` — deterministically traces each persona through the plugin's discover → clarify → design state machine without making LLM calls
+- `CoverageAssessor` — uses Claude to assess whether each loaded design-ref file actually covers the persona's specific stack
+- `GapClassifier` — converts coverage results into typed, severity-rated Findings
+
+**Persona coverage (25 personas):**
+- GCP infrastructure: Cloud Run, Cloud SQL, GKE, GCE, Cloud Functions, Cloud Storage, Pub/Sub, Cloud Spanner, Firestore
+- AI-only: OpenAI direct SDK, Anthropic SDK, Gemini SDK, OpenRouter gateway, LiteLLM proxy
+- Agentic frameworks: LangGraph, CrewAI, OpenAI Agents SDK, AutoGen, OpenAI Assistants API
+- Multi-model and billing-only paths
+
+**Gap types:**
+- `missing_file` — HIGH risk — a design-ref file the plugin would load doesn't exist
+- `coverage_gap_ai` — HIGH risk — file exists but doesn't cover the persona's AI provider/SDK
+- `coverage_gap_framework` — MEDIUM risk — file exists but doesn't cover the persona's framework
+- `coverage_gap_minor` — LOW risk — minor omission
+
+**PR optimization:** On PR-triggered runs, only re-assesses personas whose `expected_path.design_refs` overlap with the changed files.
+
+**Limitations:**
+- PathTracer encodes routing logic as Python conditions — if the plugin's routing changes, `personas.yaml` must be updated to match
+- CoverageAssessor makes one LLM call per (persona, file) pair — a full scan with 25 personas and multiple design-refs takes several minutes
+- Scenario findings never fail CI regardless of severity
+
+---
+
 | Severity | Risk | CI behavior |
 |----------|------|-------------|
 | `correctness` | HIGH | Fails PR check — blocks merge |
@@ -279,6 +314,8 @@ DYNAMODB_TABLE=watchdog-findings AWS_REGION=us-east-1 \
   python3 -m uvicorn migration_watchdog.dashboard:app --reload
 ```
 Then open http://localhost:8000.
+
+**Authentication:** When `DASHBOARD_API_KEY` is set, all routes require `Authorization: Bearer <key>`. When the env var is empty, the dashboard runs in dev mode with no authentication (suitable for local development only).
 
 ---
 
@@ -361,9 +398,7 @@ happens for some queries), it falls back to a hardcoded map of service pages.
 Claims that don't match any known service page return `unverified` rather than
 a finding.
 
-**Sequential claim verification.** Claims are verified one at a time. A
-reference file with many claims takes proportionally longer. The weekly scan
-has a 60-minute timeout.
+**Concurrent claim verification.** Claims are verified concurrently using `asyncio.gather`. A reference file with many claims still takes time proportional to the slowest batch, but multiple claims are processed in parallel. The weekly scan has a 60-minute timeout.
 
 **No automatic fix application.** The Watchdog identifies problems and suggests
 fixes, but does not apply them automatically. Approved findings trigger a PR
@@ -416,6 +451,12 @@ migration-watchdog/
 │   ├── automation_auditor.py    ← Automation Auditor (gap detection)
 │   ├── review_agent.py          ← Review Agent (Nova 2 Lite quality check)
 │   ├── refactoring_agent.py     ← Refactoring Agent (structural assessment)
+│   ├── security_auditor.py      ← Security Auditor (LLM-based security pattern detection)
+│   ├── scenario_auditor.py      ← Scenario Simulation Agent orchestrator
+│   ├── coverage_assessor.py     ← Coverage assessment (LLM-based, per persona × file)
+│   ├── path_tracer.py           ← Deterministic path tracing through plugin state machine
+│   ├── persona_library.py       ← Persona loading and validation
+│   ├── personas.yaml            ← 25 startup personas
 │   ├── pr_commenter.py          ← PR comment building and posting (extracted from main.py)
 │   ├── dashboard.py             ← FastAPI dashboard
 │   ├── models.py                ← Core dataclasses (Finding, ScanRun, etc.)
@@ -437,7 +478,13 @@ migration-watchdog/
 │       ├── test_currency_fixtures.py
 │       ├── test_automation_fixtures.py
 │       ├── test_main_pipeline.py
-│       └── test_pr_smoke.py
+│       ├── test_pr_smoke.py
+│       ├── test_dashboard_auth.py
+│       ├── test_coverage_assessor.py
+│       ├── test_gap_classifier.py
+│       ├── test_path_tracer.py
+│       ├── test_persona_library.py
+│       └── test_scenario_auditor.py
 ├── pyproject.toml
 ├── setup.py
 └── .github/
@@ -464,6 +511,9 @@ pytest tests/test_codebase_improvements.py
 pytest tests/test_currency_fixtures.py tests/test_automation_fixtures.py
 pytest tests/test_main_pipeline.py
 pytest tests/test_pr_smoke.py
+pytest tests/test_dashboard_auth.py
+pytest tests/test_coverage_assessor.py tests/test_gap_classifier.py
+pytest tests/test_path_tracer.py tests/test_persona_library.py tests/test_scenario_auditor.py
 
 # Required environment variables for a real run
 export WATCHDOG_TARGET_OWNER=aws-samples   # required — no default
@@ -496,6 +546,8 @@ python -m migration_watchdog.main
 | `AWS_REGION` | `us-east-1` | AWS region |
 | `SEVERITY_THRESHOLD` | `outdated` | PR comment filter: `outdated` or `low` |
 | `TAVILY_API_KEY` | — | Optional. Tavily API key for web search. Falls back to DuckDuckGo if absent. |
+| `SCENARIO_CONFIDENCE_THRESHOLD` | `0.7` | Minimum confidence score for Scenario Simulation Agent coverage assessments |
+| `DASHBOARD_API_KEY` | — | Optional. When set, all dashboard routes require `Authorization: Bearer <key>`. When absent, dashboard runs in dev mode with no authentication. |
 
 **Required secrets in the content repo (`herosjourney/startups`):**
 
