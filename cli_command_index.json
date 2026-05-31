@@ -56,6 +56,41 @@
       "cli_equivalent": "aws service-quotas get-service-quota --service-code bedrock --quota-code {quota_code}",
       "placeholder_list": ["quota_code"],
       "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/service-quotas/get-service-quota.html"
+    },
+    {
+      "keywords": ["enable model access", "request model access", "bedrock model access", "model access", "enable bedrock model"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws bedrock put-foundation-model-entitlement --model-id {model_id}",
+      "placeholder_list": ["model_id"],
+      "reference_url": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_PutFoundationModelEntitlement.html"
+    },
+    {
+      "keywords": ["create secret", "secrets manager", "store secret", "new secret", "secretsmanager create"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws secretsmanager create-secret --name {secret_name} --secret-string {secret_value}",
+      "placeholder_list": ["secret_name", "secret_value"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/create-secret.html"
+    },
+    {
+      "keywords": ["create agent", "agentcore", "bedrock agent", "create bedrock agent", "agent creation"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws bedrock-agent create-agent --agent-name {agent_name} --foundation-model {model_id} --role-arn {role_arn}",
+      "placeholder_list": ["agent_name", "model_id", "role_arn"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/bedrock-agent/create-agent.html"
+    },
+    {
+      "keywords": ["create repository", "ecr", "container registry", "ecr create", "elastic container registry"],
+      "action_types": ["console_navigation", "form_submission", "browser_action"],
+      "cli_equivalent": "aws ecr create-repository --repository-name {repository_name} --region {region}",
+      "placeholder_list": ["repository_name", "region"],
+      "reference_url": "https://docs.aws.amazon.com/cli/latest/reference/ecr/create-repository.html"
+    },
+    {
+      "keywords": ["push image", "docker push", "ecr push", "container image push", "push container"],
+      "action_types": ["console_navigation", "copy_paste", "browser_action"],
+      "cli_equivalent": "docker push {account_id}.dkr.ecr.{region}.amazonaws.com/{repository_name}:{tag}",
+      "placeholder_list": ["account_id", "region", "repository_name", "tag"],
+      "reference_url": "https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html"
     }
   ]
 }

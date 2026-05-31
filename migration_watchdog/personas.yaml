@@ -439,6 +439,71 @@
   known_gaps_fixed_by_prs:
     - "PR#15"
 
+- id: ai-only-openai-assistants-api
+  description: >
+    Startup with NO GCP infrastructure, using the OpenAI Assistants API
+    (stateful, multi-turn) migrating to Bedrock Mantle Responses API.
+    IS agentic. Exercises the Assistants API → Bedrock Mantle Responses API
+    migration path alongside the agentic-to-AgentCore design ref.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks:
+      - openai-assistants-sdk
+    integration_pattern: assistants_api
+    gateway_type: null
+  agentic_profile:
+    is_agentic: true
+    framework: openai-assistants-sdk
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+      - design-ref-agentic-to-agentcore.md
+  known_gaps_fixed_by_prs: []
+
+- id: ai-only-autogen
+  description: >
+    Startup with NO GCP infrastructure, using Microsoft AutoGen multi-agent
+    framework with OpenAI as the underlying provider. IS agentic with
+    multi-agent orchestration. Migrating to AWS AgentCore.
+  infrastructure:
+    gcp_services: []
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: openai
+    models:
+      - gpt-4o
+    frameworks:
+      - autogen
+    integration_pattern: direct_sdk
+    gateway_type: null
+  agentic_profile:
+    is_agentic: true
+    framework: autogen
+    tools: []
+    orchestration_pattern: multi_agent
+  expected_path:
+    discover_outputs:
+      - ai-workload-profile.json
+    clarify_route: clarify-ai-only
+    design_route: design-ai
+    design_refs:
+      - ai-openai-to-bedrock.md
+      - design-ref-agentic-to-agentcore.md
+  known_gaps_fixed_by_prs: []
+
 - id: high-volume-openai-mantle
   description: >
     Startup with NO GCP infrastructure, using the OpenAI direct SDK at high
@@ -504,3 +569,184 @@
       - database.md
   known_gaps_fixed_by_prs:
     - "PR#14"
+
+- id: gcp-cloud-functions
+  description: >
+    Startup running Cloud Functions on GCP. No AI/LLM workloads.
+    Pure infrastructure migration path exercising the serverless compute route.
+  infrastructure:
+    gcp_services:
+      - cloud_functions
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - compute.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-gce
+  description: >
+    Startup running Google Compute Engine (GCE) VMs on GCP. No AI/LLM workloads.
+    Pure infrastructure migration path exercising the VM compute route.
+  infrastructure:
+    gcp_services:
+      - gce
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - compute.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-firestore
+  description: >
+    Startup running Firestore on GCP. No AI/LLM workloads.
+    Pure infrastructure migration path exercising the NoSQL database route.
+  infrastructure:
+    gcp_services:
+      - firestore
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - database.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-cloud-storage
+  description: >
+    Startup running Cloud Storage on GCP. No AI/LLM workloads.
+    Pure infrastructure migration path exercising the object storage route.
+  infrastructure:
+    gcp_services:
+      - cloud_storage
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - storage.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-pubsub
+  description: >
+    Startup running Pub/Sub on GCP. No AI/LLM workloads.
+    Pure infrastructure migration path exercising the messaging route.
+  infrastructure:
+    gcp_services:
+      - pubsub
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - messaging.md
+  known_gaps_fixed_by_prs: []
+
+- id: gcp-cloud-spanner
+  description: >
+    Startup running Cloud Spanner on GCP. No AI/LLM workloads.
+    Pure infrastructure migration path exercising the globally-distributed
+    relational database route.
+  infrastructure:
+    gcp_services:
+      - cloud_spanner
+    has_terraform: false
+    has_billing_data: false
+  ai_stack:
+    provider: null
+    models: []
+    frameworks: []
+    integration_pattern: null
+    gateway_type: null
+  agentic_profile:
+    is_agentic: false
+    framework: null
+    tools: []
+    orchestration_pattern: null
+  expected_path:
+    discover_outputs:
+      - gcp-resource-inventory.json
+      - gcp-resource-clusters.json
+    clarify_route: clarify-global
+    design_route: design-infra
+    design_refs:
+      - database.md
+  known_gaps_fixed_by_prs: []
