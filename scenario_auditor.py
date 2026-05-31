@@ -88,7 +88,7 @@ async def run_scenario_audit(
         traces_completed += 1
 
         # Assess coverage
-        results = assessor.assess(persona, trace, repo_content)
+        results = await assessor.assess(persona, trace, repo_content)
         all_results.extend(results)
         assessments_made += len(results)
 

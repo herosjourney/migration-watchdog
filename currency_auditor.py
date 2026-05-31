@@ -14,6 +14,7 @@ The verification layer (``ClaimVerifier``) is implemented in task 6.1.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -1802,62 +1803,92 @@ async def run_currency_audit(
 
     scan_timestamp = datetime.now(timezone.utc).isoformat()
 
-    for file_path, content in files_to_audit.items():
-        # --- Step 1: Detect migration context ---
-        context_result = _detect_migration_context(file_path, content)
-        if context_result is None:
-            logger.warning(
-                "run_currency_audit: migration context not found in %s; skipping file",
-                file_path,
-            )
-            partial_source_failures.append(
-                {"type": "migration_context_failure", "file": file_path}
-            )
+    # --- Parallel extraction: Steps 1 and 2 across all files ---
+    _extract_sem = asyncio.Semaphore(5)
+
+    async def _extract_one(file_path: str, content: str) -> tuple[str, str | None, str | None, list[Claim]]:
+        """Extract claims from one file. Returns (file_path, source_system, target_system, claims)."""
+        async with _extract_sem:
+            context_result = _detect_migration_context(file_path, content)
+            if context_result is None:
+                logger.warning(
+                    "run_currency_audit: migration context not found in %s; skipping file",
+                    file_path,
+                )
+                partial_source_failures.append(
+                    {"type": "migration_context_failure", "file": file_path}
+                )
+                return file_path, None, None, []
+            source_system, target_system = context_result
+            try:
+                claims = extractor.extract(file_path, content)
+            except Exception:
+                logger.exception(
+                    "run_currency_audit: claim extraction failed for %s; skipping file",
+                    file_path,
+                )
+                partial_source_failures.append(
+                    {"type": "extraction_failure", "file": file_path}
+                )
+                return file_path, source_system, target_system, []
+            return file_path, source_system, target_system, claims
+
+    extraction_results = await asyncio.gather(
+        *[_extract_one(fp, c) for fp, c in files_to_audit.items()]
+    )
+
+    for file_path, source_system, target_system, claims in extraction_results:
+        if source_system is None or not claims:
+            if claims == [] and source_system is not None:
+                logger.info("run_currency_audit: no claims extracted from %s", file_path)
             continue
 
-        source_system, target_system = context_result
         migration_context = {
             "source_system": source_system,
             "target_system": target_system,
         }
         scope = f"{source_system} to {target_system}"
 
-        # --- Step 2: Extract claims ---
-        try:
-            claims = extractor.extract(file_path, content)
-        except Exception:
-            logger.exception(
-                "run_currency_audit: claim extraction failed for %s; skipping file",
-                file_path,
-            )
-            partial_source_failures.append(
-                {"type": "extraction_failure", "file": file_path}
-            )
-            continue
-
-        if not claims:
-            logger.info(
-                "run_currency_audit: no claims extracted from %s", file_path
-            )
-            continue
-
         # --- Step 3: Pricing cache entries already parsed above ---
 
-        # --- Step 4 & 5: Verify each claim and build Findings ---
-        for claim in claims:
-            try:
-                result: VerificationResult = verifier.verify(
-                    claim, authoritative_data, pricing_cache_entries
-                )
-            except Exception:
-                logger.exception(
-                    "run_currency_audit: verification failed for claim_id=%s in %s; skipping",
-                    claim.claim_id[:16],
-                    file_path,
-                )
+        # --- Step 4: Verify all claims in parallel via asyncio.gather() ---
+        _sem = asyncio.Semaphore(5)
+
+        async def _verify_one(claim: Claim) -> VerificationResult:
+            async with _sem:
+                try:
+                    return verifier.verify(claim, authoritative_data, pricing_cache_entries)
+                except Exception:
+                    logger.exception(
+                        "ClaimVerifier: unexpected error for claim_id=%s", claim.claim_id[:16]
+                    )
+                    return VerificationResult(
+                        claim_id=claim.claim_id,
+                        status="unverified",
+                        severity=None,
+                        actual_value=None,
+                        verification_source=None,
+                        suggested_fix=None,
+                        price_verification_path=None,
+                        price_metadata=None,
+                    )
+
+        results: list[VerificationResult] = await asyncio.gather(
+            *[_verify_one(c) for c in claims]
+        )
+
+        # --- Step 5: Build Findings from verification results ---
+        for result in results:
+            if result.status != "finding":
                 continue
 
-            if result.status != "finding":
+            # Retrieve the corresponding claim by claim_id
+            claim = next((c for c in claims if c.claim_id == result.claim_id), None)
+            if claim is None:
+                logger.warning(
+                    "run_currency_audit: no claim found for result claim_id=%s; skipping",
+                    result.claim_id[:16],
+                )
                 continue
 
             # Build auditor_payload

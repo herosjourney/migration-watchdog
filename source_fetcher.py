@@ -199,6 +199,208 @@ def extract_text_from_html(html: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fallback service docs map — used by AwsDocsSearcher._fallback_search()
+# Extracted as a module-level constant for testability.
+# ---------------------------------------------------------------------------
+
+_FALLBACK_SERVICE_DOCS: dict[str, tuple[str, str]] = {
+    "app runner": (
+        "AWS App Runner",
+        "https://docs.aws.amazon.com/apprunner/latest/dg/what-is-apprunner.html",
+    ),
+    "fargate": (
+        "AWS Fargate",
+        "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html",
+    ),
+    "lambda": (
+        "AWS Lambda",
+        "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
+    ),
+    "eks": (
+        "Amazon EKS",
+        "https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html",
+    ),
+    "ecs": (
+        "Amazon ECS",
+        "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html",
+    ),
+    "bedrock": (
+        "Amazon Bedrock",
+        "https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html",
+    ),
+    "agentcore": (
+        "Amazon Bedrock AgentCore",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html",
+    ),
+    "harness": (
+        "Amazon Bedrock AgentCore Harness",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html",
+    ),
+    "agentcore regions": (
+        "Amazon Bedrock AgentCore Regions",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html",
+    ),
+    "mantle": (
+        "Amazon Bedrock Mantle",
+        "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
+    ),
+    "mantle throughput": (
+        "Amazon Bedrock Mantle Throughput",
+        "https://docs.aws.amazon.com/bedrock/latest/userguide/scaling-throughput-best-practices.html",
+    ),
+    "tpm quota": (
+        "Amazon Bedrock TPM Quota",
+        "https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-token-burndown.html",
+    ),
+    "dynamodb": (
+        "Amazon DynamoDB",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html",
+    ),
+    "s3": (
+        "Amazon S3",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html",
+    ),
+    "rds": (
+        "Amazon RDS",
+        "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html",
+    ),
+    "aurora": (
+        "Amazon Aurora",
+        "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraOverview.html",
+    ),
+    "quota": (
+        "AWS Service Quotas",
+        "https://docs.aws.amazon.com/servicequotas/latest/userguide/intro.html",
+    ),
+    "region": (
+        "AWS Regions",
+        "https://docs.aws.amazon.com/general/latest/gr/rande.html",
+    ),
+    "agentcore cli": (
+        "Amazon Bedrock AgentCore CLI",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
+    ),
+    "agent registry": (
+        "AWS Agent Registry",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html",
+    ),
+    "agentcore release": (
+        "Amazon Bedrock AgentCore Release Notes",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/release-notes.html",
+    ),
+    "google adk": (
+        "Amazon Bedrock AgentCore CLI (Google ADK support)",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
+    ),
+    "node.js runtime": (
+        "AgentCore Runtime Node.js",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-code-deploy-node.html",
+    ),
+    "performance loop": (
+        "AgentCore Agent Performance Loop",
+        "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/optimization.html",
+    ),
+    "responses api": (
+        "Amazon Bedrock Mantle Responses API",
+        "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
+    ),
+    "assistants api": (
+        "Amazon Bedrock Mantle Responses API (Assistants API migration)",
+        "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
+    ),
+    # --- New entries (22) ---
+    "secrets manager": (
+        "AWS Secrets Manager",
+        "https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html",
+    ),
+    "eventbridge": (
+        "Amazon EventBridge",
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-what-is.html",
+    ),
+    "step functions": (
+        "AWS Step Functions",
+        "https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html",
+    ),
+    "sqs": (
+        "Amazon SQS",
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html",
+    ),
+    "sns": (
+        "Amazon SNS",
+        "https://docs.aws.amazon.com/sns/latest/dg/welcome.html",
+    ),
+    "ecr": (
+        "Amazon ECR",
+        "https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html",
+    ),
+    "cloudfront": (
+        "Amazon CloudFront",
+        "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html",
+    ),
+    "waf": (
+        "AWS WAF",
+        "https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html",
+    ),
+    "cognito": (
+        "Amazon Cognito",
+        "https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html",
+    ),
+    "api gateway": (
+        "Amazon API Gateway",
+        "https://docs.aws.amazon.com/apigateway/latest/developerguide/welcome.html",
+    ),
+    "cloudwatch": (
+        "Amazon CloudWatch",
+        "https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html",
+    ),
+    "systems manager": (
+        "AWS Systems Manager",
+        "https://docs.aws.amazon.com/systems-manager/latest/userguide/what-is-systems-manager.html",
+    ),
+    "ssm": (
+        "AWS Systems Manager",
+        "https://docs.aws.amazon.com/systems-manager/latest/userguide/what-is-systems-manager.html",
+    ),
+    "elastic load balancing": (
+        "Elastic Load Balancing",
+        "https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/what-is-load-balancing.html",
+    ),
+    "elb": (
+        "Elastic Load Balancing",
+        "https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/what-is-load-balancing.html",
+    ),
+    "auto scaling": (
+        "Amazon EC2 Auto Scaling",
+        "https://docs.aws.amazon.com/autoscaling/ec2/userguide/what-is-amazon-ec2-auto-scaling.html",
+    ),
+    "codepipeline": (
+        "AWS CodePipeline",
+        "https://docs.aws.amazon.com/codepipeline/latest/userguide/welcome.html",
+    ),
+    "codebuild": (
+        "AWS CodeBuild",
+        "https://docs.aws.amazon.com/codebuild/latest/userguide/welcome.html",
+    ),
+    "guardduty": (
+        "Amazon GuardDuty",
+        "https://docs.aws.amazon.com/guardduty/latest/ug/what-is-guardduty.html",
+    ),
+    "cloudtrail": (
+        "AWS CloudTrail",
+        "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html",
+    ),
+    "iam": (
+        "AWS IAM",
+        "https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html",
+    ),
+    "vpc": (
+        "Amazon VPC",
+        "https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html",
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # AwsDocsSearcher — live AWS documentation search
 # ---------------------------------------------------------------------------
 
@@ -255,6 +457,10 @@ class AwsDocsSearcher:
         # If HTML search didn't work, fall back to fetching specific service pages
         if not results:
             results = self._fallback_search(query, limit)
+
+        # Stage 3: URL constructor — derive a candidate URL from the query
+        if not results:
+            results = await self._construct_url_fallback(query, limit)
 
         self._search_cache[cache_key] = results
         return results
@@ -361,6 +567,32 @@ class AwsDocsSearcher:
                 break
         return results
 
+    async def _construct_url_fallback(self, query: str, limit: int) -> list[dict]:
+        """Third search stage: derive a candidate AWS docs URL from the query.
+
+        Extracts a service slug from the query and returns the first candidate
+        URL pattern directly — no network validation. If the URL is later fetched
+        by fetch_page() and the page does not exist, fetch_page() returns an empty
+        string and the claim is marked unverified, which is the same outcome as
+        the previous HEAD-validation path but without the extra round-trip.
+        """
+        import re as _re
+
+        # Slug derivation: lowercase, strip filler words, replace non-alphanumeric with hyphens
+        filler_words = {"aws", "amazon", "the", "a", "an", "service", "documentation", "docs"}
+        query_lower = query.lower()
+        words = _re.split(r'[^a-z0-9]+', query_lower)
+        slug_words = [w for w in words if w and w not in filler_words]
+        slug = "-".join(slug_words).strip("-")
+
+        if not slug:
+            return []
+
+        # Return the first candidate URL directly — no HEAD validation
+        url = f"https://docs.aws.amazon.com/{slug}/latest/userguide/what-is-{slug}.html"
+        title = f"AWS {slug.replace('-', ' ').title()} Documentation"
+        return [{"title": title, "url": url, "snippet": ""}]
+
     def _fallback_search(self, query: str, limit: int) -> list[dict]:
         """Fallback: return known AWS service page URLs relevant to the query.
 
@@ -369,115 +601,8 @@ class AwsDocsSearcher:
         """
         query_lower = query.lower()
 
-        service_docs: dict[str, tuple[str, str]] = {
-            "app runner": (
-                "AWS App Runner",
-                "https://docs.aws.amazon.com/apprunner/latest/dg/what-is-apprunner.html",
-            ),
-            "fargate": (
-                "AWS Fargate",
-                "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html",
-            ),
-            "lambda": (
-                "AWS Lambda",
-                "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
-            ),
-            "eks": (
-                "Amazon EKS",
-                "https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html",
-            ),
-            "ecs": (
-                "Amazon ECS",
-                "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html",
-            ),
-            "bedrock": (
-                "Amazon Bedrock",
-                "https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html",
-            ),
-            "agentcore": (
-                "Amazon Bedrock AgentCore",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html",
-            ),
-            "harness": (
-                "Amazon Bedrock AgentCore Harness",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html",
-            ),
-            "agentcore regions": (
-                "Amazon Bedrock AgentCore Regions",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html",
-            ),
-            "mantle": (
-                "Amazon Bedrock Mantle",
-                "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
-            ),
-            "mantle throughput": (
-                "Amazon Bedrock Mantle Throughput",
-                "https://docs.aws.amazon.com/bedrock/latest/userguide/scaling-throughput-best-practices.html",
-            ),
-            "tpm quota": (
-                "Amazon Bedrock TPM Quota",
-                "https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-token-burndown.html",
-            ),
-            "dynamodb": (
-                "Amazon DynamoDB",
-                "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html",
-            ),
-            "s3": (
-                "Amazon S3",
-                "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html",
-            ),
-            "rds": (
-                "Amazon RDS",
-                "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html",
-            ),
-            "aurora": (
-                "Amazon Aurora",
-                "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraOverview.html",
-            ),
-            "quota": (
-                "AWS Service Quotas",
-                "https://docs.aws.amazon.com/servicequotas/latest/userguide/intro.html",
-            ),
-            "region": (
-                "AWS Regions",
-                "https://docs.aws.amazon.com/general/latest/gr/rande.html",
-            ),
-            "agentcore cli": (
-                "Amazon Bedrock AgentCore CLI",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
-            ),
-            "agent registry": (
-                "AWS Agent Registry",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html",
-            ),
-            "agentcore release": (
-                "Amazon Bedrock AgentCore Release Notes",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/release-notes.html",
-            ),
-            "google adk": (
-                "Amazon Bedrock AgentCore CLI (Google ADK support)",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-get-started-cli.html",
-            ),
-            "node.js runtime": (
-                "AgentCore Runtime Node.js",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-code-deploy-node.html",
-            ),
-            "performance loop": (
-                "AgentCore Agent Performance Loop",
-                "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/optimization.html",
-            ),
-            "responses api": (
-                "Amazon Bedrock Mantle Responses API",
-                "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
-            ),
-            "assistants api": (
-                "Amazon Bedrock Mantle Responses API (Assistants API migration)",
-                "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
-            ),
-        }
-
         results: list[dict] = []
-        for keyword, (title, url) in service_docs.items():
+        for keyword, (title, url) in _FALLBACK_SERVICE_DOCS.items():
             if keyword in query_lower:
                 results.append({"title": title, "url": url, "snippet": ""})
             if len(results) >= limit:

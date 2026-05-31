@@ -321,7 +321,7 @@ class ActionExtractor:
     # Public API
     # ------------------------------------------------------------------
 
-    def extract(self, file_path: str, content: str) -> list[ManualAction]:
+    async def extract(self, file_path: str, content: str) -> list[ManualAction]:
         """Extract all manual action instructions from a Reference_File.
 
         Steps
@@ -355,7 +355,7 @@ class ActionExtractor:
             )
             return []
 
-        raw_candidates = self._call_llm(file_path, content)
+        raw_candidates = await self._call_llm(file_path, content)
         actions = self._parse_and_validate(raw_candidates, file_path)
         return self._deduplicate(actions)
 
@@ -440,38 +440,41 @@ class ActionExtractor:
         ]
         return any(kw in lower for kw in migration_keywords)
 
-    def _call_llm(self, file_path: str, content: str) -> list[dict]:
+    async def _call_llm(self, file_path: str, content: str) -> list[dict]:
         """Call the LLM to extract candidate manual actions.
 
-        Returns the parsed list of raw candidate dicts from the LLM response,
-        or an empty list on any error.
+        Wraps the Bedrock agent call in retry_with_backoff (max 3 retries,
+        2 s base delay).  Returns the parsed list of raw candidate dicts from
+        the LLM response, or an empty list when all retries are exhausted.
         """
-        from strands import Agent
-        from strands.models.bedrock import BedrockModel
-
-        model = BedrockModel(
-            model_id=self._model_id,
-            region_name="us-east-1",
-            max_tokens=8000,
-        )
-        agent = Agent(
-            model=model,
-            system_prompt=_EXTRACTION_SYSTEM_PROMPT,
-        )
+        from migration_watchdog.retry import retry_with_backoff
 
         user_message = _build_extraction_prompt(file_path, content)
 
-        try:
-            response = agent(user_message)
+        async def _call() -> list[dict]:
+            from strands import Agent
+            from strands.models.bedrock import BedrockModel
+
+            model = BedrockModel(
+                model_id=self._model_id,
+                region_name="us-east-1",
+                max_tokens=8000,
+            )
+            agent = Agent(
+                model=model,
+                system_prompt=_EXTRACTION_SYSTEM_PROMPT,
+            )
             # Strands Agent returns an AgentResult; str() gives the text content.
-            response_text = str(response)
+            response_text = str(agent(user_message))
+            return self._parse_llm_response(response_text, file_path)
+
+        try:
+            return await retry_with_backoff(_call, max_retries=3, base_delay=2.0)
         except Exception:
             logger.exception(
-                "automation_auditor: LLM call failed for %s", file_path
+                "automation_auditor: all retries exhausted for %s", file_path
             )
             return []
-
-        return self._parse_llm_response(response_text, file_path)
 
     def _parse_llm_response(self, response_text: str, file_path: str) -> list[dict]:
         """Parse the LLM response text into a list of raw candidate dicts.
@@ -1460,7 +1463,7 @@ async def run_automation_audit(
 
         # --- Step 2: Extract manual actions ---
         try:
-            actions = extractor.extract(file_path, file_content)
+            actions = await extractor.extract(file_path, file_content)
         except Exception:
             logger.exception(
                 "run_automation_audit: ActionExtractor failed for %s — skipping",

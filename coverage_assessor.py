@@ -125,7 +125,7 @@ class CoverageAssessor:
     # Public API
     # ------------------------------------------------------------------
 
-    def assess(
+    async def assess(
         self,
         persona: Persona,
         trace: ExecutionTrace,
@@ -181,7 +181,7 @@ class CoverageAssessor:
                 )
                 continue
 
-            result = self._assess_file(persona, ref, content)
+            result = await self._assess_file(persona, ref, content)
             results.append(result)
 
         return results
@@ -190,10 +190,14 @@ class CoverageAssessor:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _assess_file(
+    async def _assess_file(
         self, persona: Persona, file_path: str, content: str
     ) -> CoverageResult:
-        """Make one LLM call to assess whether a file covers the persona's stack.
+        """Make one LLM call (with retry) to assess whether a file covers the persona's stack.
+
+        Wraps the Bedrock Agent call in ``retry_with_backoff`` with up to 3
+        retries and a 2-second base delay. If all retries are exhausted,
+        returns a result with ``coverage="unverified"`` and ``confidence=0.0``.
 
         Args:
             persona: The startup persona being assessed.
@@ -201,11 +205,33 @@ class CoverageAssessor:
             content: The markdown content of the design-ref file.
 
         Returns:
-            A ``CoverageResult`` parsed from the LLM response. On parse
-            failure, returns a result with ``coverage="unverified"`` and
+            A ``CoverageResult`` parsed from the LLM response. On exhausted
+            retries, returns a result with ``coverage="unverified"`` and
             ``confidence=0.0``.
         """
-        try:
+        from migration_watchdog.retry import retry_with_backoff
+
+        user_prompt = (
+            f"Persona: {persona.id}\n"
+            f"Description: {persona.description}\n"
+            f"AI Provider: {persona.ai_stack.provider}\n"
+            f"Models: {persona.ai_stack.models}\n"
+            f"Frameworks: {persona.ai_stack.frameworks}\n"
+            f"Integration Pattern: {persona.ai_stack.integration_pattern}\n"
+            f"Gateway Type: {persona.ai_stack.gateway_type}\n"
+            f"Is Agentic: {persona.agentic_profile.is_agentic}\n"
+            f"Agentic Framework: {persona.agentic_profile.framework}\n"
+            f"\n"
+            f"File: {file_path}\n"
+            f"Content:\n"
+            f"```markdown\n"
+            f"{content[:6000]}\n"
+            f"```\n"
+            f"\n"
+            f"Assess whether this file provides adequate guidance for this startup's stack."
+        )
+
+        async def _call() -> CoverageResult:
             from strands import Agent  # lazy import — not available in test env
             from strands.models.bedrock import BedrockModel  # lazy import
 
@@ -215,34 +241,14 @@ class CoverageAssessor:
                 max_tokens=2000,
             )
             agent = Agent(model=model, system_prompt=_ASSESSMENT_SYSTEM_PROMPT)
-
-            user_prompt = (
-                f"Persona: {persona.id}\n"
-                f"Description: {persona.description}\n"
-                f"AI Provider: {persona.ai_stack.provider}\n"
-                f"Models: {persona.ai_stack.models}\n"
-                f"Frameworks: {persona.ai_stack.frameworks}\n"
-                f"Integration Pattern: {persona.ai_stack.integration_pattern}\n"
-                f"Gateway Type: {persona.ai_stack.gateway_type}\n"
-                f"Is Agentic: {persona.agentic_profile.is_agentic}\n"
-                f"Agentic Framework: {persona.agentic_profile.framework}\n"
-                f"\n"
-                f"File: {file_path}\n"
-                f"Content:\n"
-                f"```markdown\n"
-                f"{content[:6000]}\n"
-                f"```\n"
-                f"\n"
-                f"Assess whether this file provides adequate guidance for this startup's stack."
-            )
-
             response_text = str(agent(user_prompt))
             return self._parse_response(response_text, persona.id, file_path)
 
+        try:
+            return await retry_with_backoff(_call, max_retries=3, base_delay=2.0)
         except Exception:
             logger.exception(
-                "CoverageAssessor: LLM call failed for persona='%s' file='%s'; "
-                "returning unverified result",
+                "CoverageAssessor: all retries exhausted for persona='%s' file='%s'",
                 persona.id,
                 file_path,
             )
