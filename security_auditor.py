@@ -203,38 +203,29 @@ class LLMSecurityScanner:
         issue_type, severity, title, description, suggested_fix,
         line_context, source_url
 
-        Returns [] on clean scan (no issues found) OR on failure.
-        Check logs to distinguish: failures log at ERROR level with
-        'scan failed', clean scans log at DEBUG level with 'no issues found'.
+        Returns [] on a clean scan (no issues found).
+        Raises on failure — callers are responsible for catching exceptions
+        and recording partial failures.
         """
-        try:
-            model = BedrockModel(
-                model_id=self._model_id,
-                region_name=self._region_name,
-                max_tokens=4000,
-            )
-            agent = Agent(
-                model=model,
-                system_prompt=_SECURITY_SYSTEM_PROMPT,
-                tools=[search_aws_security_docs],
-            )
-            prompt = _build_security_prompt(file_path, content)
-            response_text = str(agent(prompt))
-            issues = self._parse_response(response_text, file_path)
-            if not issues:
-                logger.debug(
-                    "LLMSecurityScanner: no issues found in %s (clean scan)",
-                    file_path,
-                )
-            return issues
-        except Exception:
-            logger.error(
-                "LLMSecurityScanner: scan FAILED for %s — returning [] due to exception. "
-                "Zero findings from this file may mean scan failure, not clean file.",
+        model = BedrockModel(
+            model_id=self._model_id,
+            region_name=self._region_name,
+            max_tokens=4000,
+        )
+        agent = Agent(
+            model=model,
+            system_prompt=_SECURITY_SYSTEM_PROMPT,
+            tools=[search_aws_security_docs],
+        )
+        prompt = _build_security_prompt(file_path, content)
+        response_text = str(agent(prompt))
+        issues = self._parse_response(response_text, file_path)
+        if not issues:
+            logger.debug(
+                "LLMSecurityScanner: no issues found in %s (clean scan)",
                 file_path,
-                exc_info=True,
             )
-            return []
+        return issues
 
     def _parse_response(self, response_text: str, file_path: str) -> list[dict]:
         """Parse the LLM response into a list of issue dicts."""
@@ -364,11 +355,19 @@ async def run_security_audit(
     repo_content: Any,
     run_id: str,
     file_filter: list[str] | None = None,
+    partial_failures: list[str] | None = None,
 ) -> list[Finding]:
     """Run the LLM-based security audit over reference files.
 
     Uses Claude Opus 4.7 to reason about security issues in files that
     describe generated scripts, Terraform, and Python code.
+
+    Args:
+        repo_content: Repository content with a ``files`` dict.
+        run_id: Unique identifier for this scan run.
+        file_filter: Optional list of file paths to restrict scanning to.
+        partial_failures: Optional mutable list; on per-file scan failure a
+            JSON-encoded entry is appended and scanning continues.
     """
     scanner = LLMSecurityScanner()
     findings: list[Finding] = []
@@ -393,7 +392,23 @@ async def run_security_audit(
 
         scanned_count += 1
         logger.info("Security audit: scanning %s", file_path)
-        issues = scanner.scan_file(file_path, content)
+        try:
+            issues = scanner.scan_file(file_path, content)
+        except Exception as exc:
+            logger.error(
+                "LLMSecurityScanner: scan FAILED for %s — recording partial failure and continuing.",
+                file_path,
+                exc_info=True,
+            )
+            if partial_failures is not None:
+                partial_failures.append(
+                    json.dumps({
+                        "type": "security_scan_failure",
+                        "file": file_path,
+                        "error": str(exc),
+                    })
+                )
+            continue
 
         for issue in issues:
             finding = _issue_to_finding(issue, file_path, run_id)

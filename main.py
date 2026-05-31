@@ -347,6 +347,7 @@ async def run_scan(_source_fetcher=None) -> None:
             security_findings = await run_security_audit(
                 repo_content, run_id,
                 file_filter=_normalized_changed_files if config.trigger_type == "pull_request" else None,
+                partial_failures=partial_source_failures,
             )
             logger.info("Security audit produced %d findings", len(security_findings))
         except Exception as exc:

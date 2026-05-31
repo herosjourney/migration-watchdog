@@ -16,8 +16,9 @@ from typing import Any, Optional
 
 import boto3
 from botocore.config import Config
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mangum import Mangum
 
 from migration_watchdog.findings_repository import FindingsRepository
@@ -36,6 +37,34 @@ DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
 GITHUB_APP_PRIVATE_KEY_ENCRYPTED = os.environ.get("GITHUB_APP_PRIVATE_KEY_ENCRYPTED", "")
 GITHUB_INSTALLATION_ID = os.environ.get("GITHUB_INSTALLATION_ID", "")
+
+if not DASHBOARD_API_KEY:
+    logger.warning(
+        "DASHBOARD_API_KEY is not set — dashboard is running in dev mode with no authentication"
+    )
+
+# ---------------------------------------------------------------------------
+# Authentication dependency
+# ---------------------------------------------------------------------------
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def verify_api_key(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
+) -> None:
+    """FastAPI dependency: enforce DASHBOARD_API_KEY when set.
+
+    When ``DASHBOARD_API_KEY`` is empty the dashboard runs in dev mode and all
+    requests are allowed through.  When it is set, the ``Authorization: Bearer
+    <key>`` header must be present and must match the configured key exactly;
+    any other value (including a missing header) results in HTTP 401.
+    """
+    if not DASHBOARD_API_KEY:
+        # Dev mode — no key configured, allow all requests.
+        return
+    if credentials is None or credentials.credentials != DASHBOARD_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Target repo for PR creation (fork-based flow).
 # Branches are pushed to the FORK, PRs are opened against the UPSTREAM.
@@ -1279,17 +1308,24 @@ app = FastAPI(title="Migration Plugin Watchdog Dashboard")
 async def auth_middleware(request: Request, call_next):
     """Simple API-key authentication middleware.
 
-    Checks for ``X-API-Key`` header or ``api_key`` query parameter.
+    Checks for ``Authorization: Bearer <key>`` header (preferred), ``X-API-Key``
+    header, or ``api_key`` query parameter.
     Skips authentication for the ``/health`` endpoint.
     """
     if request.url.path == "/health":
         return await call_next(request)
 
-    api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-
     if not DASHBOARD_API_KEY:
         # If no API key is configured, allow all requests (dev mode).
         return await call_next(request)
+
+    # Accept Authorization: Bearer <key> (preferred), X-API-Key header, or api_key query param.
+    auth_header = request.headers.get("Authorization", "")
+    bearer_token: str | None = None
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:]
+
+    api_key = bearer_token or request.headers.get("X-API-Key") or request.query_params.get("api_key")
 
     if not api_key or api_key != DASHBOARD_API_KEY:
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
@@ -1324,7 +1360,10 @@ async def root():
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(run_id: Optional[str] = Query(default=None)):
+async def dashboard_page(
+    run_id: Optional[str] = Query(default=None),
+    _: None = Depends(verify_api_key),
+):
     """Serve the main HTML dashboard page showing all findings.
 
     When ``run_id`` is provided, findings are scoped to that scan run and
@@ -1930,6 +1969,7 @@ async def list_findings(
     sort_by: str = Query(default="risk_level"),
     sort_order: str = Query(default="desc"),
     run_id: Optional[str] = Query(default=None),
+    _: None = Depends(verify_api_key),
 ):
     """List findings with optional filtering and sorting.
 
@@ -1992,7 +2032,7 @@ async def list_findings(
 
 
 @app.get("/api/findings/{finding_id}")
-async def get_finding(finding_id: str):
+async def get_finding(finding_id: str, _: None = Depends(verify_api_key)):
     """Return full details for a single finding."""
     repo = _get_findings_repository()
     finding = repo.get_finding(finding_id)
@@ -2002,7 +2042,7 @@ async def get_finding(finding_id: str):
 
 
 @app.post("/api/findings/{finding_id}/approve")
-async def approve_finding(finding_id: str):
+async def approve_finding(finding_id: str, _: None = Depends(verify_api_key)):
     """Approve a finding: update status and trigger PR creation.
 
     Returns the PR URL on success.
@@ -2026,7 +2066,7 @@ async def approve_finding(finding_id: str):
 
 
 @app.post("/api/findings/{finding_id}/decline")
-async def decline_finding(finding_id: str):
+async def decline_finding(finding_id: str, _: None = Depends(verify_api_key)):
     """Decline a finding: update status and record 2-month dismissal cooldown."""
     repo = _get_findings_repository()
     finding = repo.get_finding(finding_id)
@@ -2048,7 +2088,7 @@ async def decline_finding(finding_id: str):
 
 
 @app.get("/api/runs")
-async def list_runs():
+async def list_runs(_: None = Depends(verify_api_key)):
     """List all scan runs.
 
     Scans the DynamoDB table for RUN# entities and returns them sorted
@@ -2072,7 +2112,7 @@ async def list_runs():
 
 
 @app.get("/api/runs/{run_id}")
-async def get_run(run_id: str):
+async def get_run(run_id: str, _: None = Depends(verify_api_key)):
     """Return details for a single scan run."""
     repo = _get_findings_repository()
     run = repo.get_run(run_id)
