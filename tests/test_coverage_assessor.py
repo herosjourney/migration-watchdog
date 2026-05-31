@@ -5,9 +5,10 @@ All LLM calls are mocked — no real Bedrock calls are made.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -105,7 +106,7 @@ def test_missing_file_produces_missing_file_result():
     repo = _make_empty_repo()
 
     assessor = CoverageAssessor()
-    results = assessor.assess(persona, trace, repo)
+    results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 1
     result = results[0]
@@ -126,7 +127,7 @@ def test_missing_file_result_has_gap_description():
     repo = _make_empty_repo()
 
     assessor = CoverageAssessor()
-    results = assessor.assess(persona, trace, repo)
+    results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 1
     assert len(results[0].gaps) > 0
@@ -144,7 +145,7 @@ def test_missing_file_result_has_suggested_addition():
     repo = _make_empty_repo()
 
     assessor = CoverageAssessor()
-    results = assessor.assess(persona, trace, repo)
+    results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 1
     assert len(results[0].suggested_additions) > 0
@@ -161,8 +162,8 @@ def test_no_llm_call_for_missing_files():
     repo = _make_empty_repo()
 
     assessor = CoverageAssessor()
-    with patch.object(CoverageAssessor, "_assess_file") as mock_assess:
-        results = assessor.assess(persona, trace, repo)
+    with patch.object(CoverageAssessor, "_assess_file", new_callable=AsyncMock) as mock_assess:
+        results = asyncio.run(assessor.assess(persona, trace, repo))
         mock_assess.assert_not_called()
 
     assert len(results) == 1
@@ -194,8 +195,8 @@ def test_adequate_coverage_returns_adequate():
     )
 
     assessor = CoverageAssessor()
-    with patch.object(CoverageAssessor, "_assess_file", return_value=adequate_result):
-        results = assessor.assess(persona, trace, repo)
+    with patch.object(CoverageAssessor, "_assess_file", new_callable=AsyncMock, return_value=adequate_result):
+        results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 1
     assert results[0].coverage == "adequate"
@@ -226,8 +227,8 @@ def test_gap_coverage_returns_gap():
     )
 
     assessor = CoverageAssessor()
-    with patch.object(CoverageAssessor, "_assess_file", return_value=gap_result):
-        results = assessor.assess(persona, trace, repo)
+    with patch.object(CoverageAssessor, "_assess_file", new_callable=AsyncMock, return_value=gap_result):
+        results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 1
     assert results[0].coverage == "gap"
@@ -267,9 +268,9 @@ def test_multiple_design_refs_assessed_separately():
 
     assessor = CoverageAssessor()
     with patch.object(
-        CoverageAssessor, "_assess_file", side_effect=[compute_result, ai_result]
+        CoverageAssessor, "_assess_file", new_callable=AsyncMock, side_effect=[compute_result, ai_result]
     ):
-        results = assessor.assess(persona, trace, repo)
+        results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 2
     file_paths = {r.file_path for r in results}
@@ -297,8 +298,8 @@ def test_mixed_missing_and_loaded_files():
     )
 
     assessor = CoverageAssessor()
-    with patch.object(CoverageAssessor, "_assess_file", return_value=compute_result):
-        results = assessor.assess(persona, trace, repo)
+    with patch.object(CoverageAssessor, "_assess_file", new_callable=AsyncMock, return_value=compute_result):
+        results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert len(results) == 2
     coverages = {r.file_path: r.coverage for r in results}
@@ -429,7 +430,7 @@ def test_empty_trace_returns_empty_results():
     repo = _make_empty_repo()
 
     assessor = CoverageAssessor()
-    results = assessor.assess(persona, trace, repo)
+    results = asyncio.run(assessor.assess(persona, trace, repo))
 
     assert results == []
 
@@ -446,8 +447,8 @@ def test_file_not_in_repo_content_is_skipped():
     repo = _make_empty_repo()
 
     assessor = CoverageAssessor()
-    with patch.object(CoverageAssessor, "_assess_file") as mock_assess:
-        results = assessor.assess(persona, trace, repo)
+    with patch.object(CoverageAssessor, "_assess_file", new_callable=AsyncMock) as mock_assess:
+        results = asyncio.run(assessor.assess(persona, trace, repo))
         mock_assess.assert_not_called()
 
     # No result produced for a file that can't be found in repo_content

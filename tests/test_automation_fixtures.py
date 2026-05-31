@@ -69,7 +69,7 @@ def _make_auth_data() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _llm_full_gap(file_path: str, content: str) -> list[dict]:
+async def _llm_full_gap(file_path: str, content: str) -> list[dict]:
     """Return a console_navigation action with no generated artifact."""
     return [
         {
@@ -81,7 +81,7 @@ def _llm_full_gap(file_path: str, content: str) -> list[dict]:
     ]
 
 
-def _llm_partial_gap(file_path: str, content: str) -> list[dict]:
+async def _llm_partial_gap(file_path: str, content: str) -> list[dict]:
     """Return a form_submission action for quota increase with a script that only checks."""
     return [
         {
@@ -93,7 +93,7 @@ def _llm_partial_gap(file_path: str, content: str) -> list[dict]:
     ]
 
 
-def _llm_human_gate(file_path: str, content: str) -> list[dict]:
+async def _llm_human_gate(file_path: str, content: str) -> list[dict]:
     """Return a console_navigation action for IAM role creation."""
     return [
         {
@@ -105,7 +105,7 @@ def _llm_human_gate(file_path: str, content: str) -> list[dict]:
     ]
 
 
-def _llm_dedupe_key(file_path: str, content: str) -> list[dict]:
+async def _llm_dedupe_key(file_path: str, content: str) -> list[dict]:
     """Return two distinct manual actions in the same file."""
     return [
         {

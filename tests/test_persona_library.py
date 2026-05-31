@@ -514,3 +514,119 @@ def test_production_personas_ai_only_have_no_gcp_services():
             assert persona.infrastructure.has_terraform is False, (
                 f"Persona '{persona.id}' starts with 'ai-only-' but has has_terraform=True"
             )
+
+
+def test_persona_count_ratchet():
+    """Persona count must never drop below 23 (the ratchet floor).
+
+    This test enforces the persona maintenance workflow documented in CONTRIBUTING.md:
+    any PR that removes personas without adding replacements will fail CI.
+    """
+    lib = PersonaLibrary()
+    personas = lib.load(str(PERSONAS_YAML_PATH))
+    assert len(personas) >= 23, (
+        f"Persona count {len(personas)} is below the ratchet floor of 23 — "
+        "a PR removed personas without adding replacements. "
+        "See CONTRIBUTING.md for the persona maintenance workflow."
+    )
+
+
+def test_gap_personas_have_design_refs():
+    """Every persona with known_gaps_fixed_by_prs must have non-empty design_refs.
+
+    A gap-fixing persona must exercise the path it claims to fix — if design_refs
+    is empty, the persona cannot trigger coverage assessment for the gap.
+    """
+    lib = PersonaLibrary()
+    personas = lib.load(str(PERSONAS_YAML_PATH))
+    for persona in personas:
+        if persona.known_gaps_fixed_by_prs:
+            assert persona.expected_path.design_refs, (
+                f"Persona '{persona.id}' has known_gaps_fixed_by_prs="
+                f"{persona.known_gaps_fixed_by_prs} but expected_path.design_refs is empty. "
+                "A gap-fixing persona must exercise the path it claims to fix."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.1 — New AI migration persona existence and routing
+# ---------------------------------------------------------------------------
+
+NEW_AI_PERSONA_IDS = [
+    "ai-only-openai-assistants-api",
+    "ai-only-autogen",
+]
+
+
+def test_new_ai_personas_exist_in_yaml():
+    """Asserts both new AI migration persona IDs are present in personas.yaml."""
+    lib = PersonaLibrary()
+    personas = lib.load(str(PERSONAS_YAML_PATH))
+    loaded_ids = {p.id for p in personas}
+    for persona_id in NEW_AI_PERSONA_IDS:
+        assert persona_id in loaded_ids, (
+            f"New AI persona '{persona_id}' not found in personas.yaml"
+        )
+
+
+def test_ai_only_openai_assistants_api_fields():
+    """Asserts ai-only-openai-assistants-api has correct provider, integration_pattern, and is_agentic."""
+    lib = PersonaLibrary()
+    personas = lib.load(str(PERSONAS_YAML_PATH))
+    persona_map = {p.id: p for p in personas}
+    p = persona_map["ai-only-openai-assistants-api"]
+    assert p.ai_stack.provider == "openai"
+    assert p.ai_stack.integration_pattern == "assistants_api"
+    assert p.agentic_profile.is_agentic is True
+    assert p.agentic_profile.framework == "openai-assistants-sdk"
+    assert p.infrastructure.gcp_services == []
+    assert p.infrastructure.has_terraform is False
+    assert p.expected_path.clarify_route == "clarify-ai-only"
+    assert p.expected_path.design_route == "design-ai"
+    assert "ai-workload-profile.json" in p.expected_path.discover_outputs
+    assert "ai-openai-to-bedrock.md" in p.expected_path.design_refs
+    assert "design-ref-agentic-to-agentcore.md" in p.expected_path.design_refs
+
+
+def test_ai_only_autogen_fields():
+    """Asserts ai-only-autogen has correct provider, framework, orchestration_pattern, and is_agentic."""
+    lib = PersonaLibrary()
+    personas = lib.load(str(PERSONAS_YAML_PATH))
+    persona_map = {p.id: p for p in personas}
+    p = persona_map["ai-only-autogen"]
+    assert p.ai_stack.provider == "openai"
+    assert p.agentic_profile.is_agentic is True
+    assert p.agentic_profile.framework == "autogen"
+    assert p.agentic_profile.orchestration_pattern == "multi_agent"
+    assert p.infrastructure.gcp_services == []
+    assert p.infrastructure.has_terraform is False
+    assert p.expected_path.clarify_route == "clarify-ai-only"
+    assert p.expected_path.design_route == "design-ai"
+    assert "ai-workload-profile.json" in p.expected_path.discover_outputs
+    assert "ai-openai-to-bedrock.md" in p.expected_path.design_refs
+    assert "design-ref-agentic-to-agentcore.md" in p.expected_path.design_refs
+
+
+def test_new_ai_personas_path_tracer_routing():
+    """Calls PathTracer.trace() for each new AI persona and asserts design_refs_loaded is non-empty."""
+    from migration_watchdog.path_tracer import PathTracer
+    from migration_watchdog.models import RepoContent
+
+    lib = PersonaLibrary()
+    personas = lib.load(str(PERSONAS_YAML_PATH))
+    persona_map = {p.id: p for p in personas}
+
+    # Minimal repo content — no files present; we only care that design_refs are
+    # determined (they may be missing from the snapshot, but they must be non-empty).
+    repo = RepoContent(files={})
+    tracer = PathTracer()
+
+    for persona_id in NEW_AI_PERSONA_IDS:
+        persona = persona_map[persona_id]
+        trace = tracer.trace(persona, repo)
+        # design_refs_loaded tracks files that exist in the snapshot;
+        # for a minimal repo, check decision_points instead (refs were attempted).
+        attempted_refs = [dp.file_referenced for dp in trace.decision_points if dp.file_referenced]
+        assert len(attempted_refs) > 0, (
+            f"PathTracer produced no design ref decision points for persona '{persona_id}'"
+        )
