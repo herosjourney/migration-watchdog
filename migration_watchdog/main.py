@@ -23,6 +23,7 @@ import httpx
 from migration_watchdog.analysis_agent import run_analysis
 from migration_watchdog.finding_deduplicator import deduplicate
 from migration_watchdog.findings_repository import FindingsRepository
+from migration_watchdog.improvement_advisor import improvement_dedupe_key, run_improvement_advisor
 from migration_watchdog.models import Finding, RiskLevel, ScanRun
 from migration_watchdog.refactoring_agent import run_refactoring_assessment
 from migration_watchdog.repo_scanner import RepoScanner
@@ -655,6 +656,21 @@ async def run_scan() -> None:
                 f"scenario_audit_error: {exc}"
             )
 
+        # 4e. Run improvement advisor (scheduled runs only)
+        improvement_findings: list[Finding] = []
+        if trigger_type == "scheduled":
+            try:
+                improvement_findings = await run_improvement_advisor(
+                    repo_content=repo_content,
+                    run_id=run_id,
+                )
+                logger.info("Improvement advisor produced %d findings", len(improvement_findings))
+            except Exception as exc:
+                logger.warning("Improvement advisor failed: %s", exc)
+                partial_source_failures.append(
+                    f"improvement_advisor_error: {exc}"
+                )
+
         # 5. Deduplicate findings with per-category keys
         logger.info("Deduplicating findings …")
         existing_findings = findings_repo.list_findings(exclude_dismissed=False) if _has_aws_credentials else []
@@ -679,13 +695,20 @@ async def run_scan() -> None:
             scenario_findings, repo_content.open_prs, existing_findings,
         )
 
-        all_deduped = deduped_analysis + deduped_currency + deduped_automation + deduped_scenario
+        # Improvement findings use improvement_dedupe_key
+        deduped_improvement = deduplicate(
+            improvement_findings, repo_content.open_prs, existing_findings,
+            dedupe_key_fn=improvement_dedupe_key,
+        )
+
+        all_deduped = deduped_analysis + deduped_currency + deduped_automation + deduped_scenario + deduped_improvement
         logger.info(
-            "Deduplication: analysis=%d, currency=%d, automation=%d, scenario=%d -> total=%d findings",
+            "Deduplication: analysis=%d, currency=%d, automation=%d, scenario=%d, improvement=%d -> total=%d findings",
             len(deduped_analysis),
             len(deduped_currency),
             len(deduped_automation),
             len(deduped_scenario),
+            len(deduped_improvement),
             len(all_deduped),
         )
 
