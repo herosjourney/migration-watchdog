@@ -9,8 +9,8 @@ seven AI agents on every pull request and on a weekly schedule.
 
 ## The problem
 
-The migration plugin helps startups move workloads from GCP to AWS. It generates
-migration plans, cost estimates, and setup scripts by reading a set of reference
+The migration plugin helps startups move workloads from GCP to AWS and Heroku to AWS. 
+It generates migration plans, cost estimates, and setup scripts by reading a set of reference
 files — pricing tables, model ID mappings, region availability lists, service
 guidance, and runbook templates.
 
