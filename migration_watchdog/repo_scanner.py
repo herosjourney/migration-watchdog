@@ -17,11 +17,17 @@ import jwt
 from migration_watchdog.models import PullRequest, RepoContent
 from migration_watchdog.retry import retry_with_backoff
 
-# Path prefix for markdown files to scan in the target repo.
-REFERENCES_PATH = "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references"
+# Path prefixes for markdown files to scan in the target repo.
+REFERENCES_PATHS = [
+    "migrate/plugins/migration-to-aws/skills/gcp-to-aws/references",
+    "migrate/plugins/migration-to-aws/skills/heroku-to-aws/references",
+]
 
 # Additional top-level files to include (SKILL.md lives above references/).
-SKILL_PATH = "migrate/plugins/migration-to-aws/skills/gcp-to-aws/SKILL.md"
+SKILL_PATHS = [
+    "migrate/plugins/migration-to-aws/skills/gcp-to-aws/SKILL.md",
+    "migrate/plugins/migration-to-aws/skills/heroku-to-aws/SKILL.md",
+]
 
 # GitHub API base URL.
 GITHUB_API = "https://api.github.com"
@@ -128,7 +134,7 @@ class RepoScanner:
             )
             commit_sha = branch_data.get("sha", "")
 
-            # 3. Filter for .md files under the references path.
+            # 3. Filter for .md files under the references paths.
             md_files: dict[str, str] = {}
             tree_items = branch_data.get("tree", [])
             md_paths = [
@@ -136,8 +142,11 @@ class RepoScanner:
                 for item in tree_items
                 if item.get("type") == "blob"
                 and (
-                    (item["path"].startswith(REFERENCES_PATH) and item["path"].endswith(".md"))
-                    or item["path"] == SKILL_PATH
+                    (
+                        any(item["path"].startswith(p) for p in REFERENCES_PATHS)
+                        and item["path"].endswith(".md")
+                    )
+                    or item["path"] in SKILL_PATHS
                 )
             ]
 

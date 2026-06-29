@@ -300,6 +300,31 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
         if payload.get("human_gate") == "required":
             parts.append('<span style="color:#ce93d8; font-size:0.82em;">🔒 needs approval</span>')
 
+    elif schema.startswith("improvement/"):
+        impact_score = payload.get("impact_score")
+        effort_score = payload.get("effort_score")
+        improvement_category = payload.get("improvement_category", "")
+        _impact_colors = {3: "#ffee58", 4: "#ffb74d", 5: "#ff5252"}
+        _effort_colors = {1: "#a5d6a7", 2: "#ffee58", 3: "#ffb74d"}
+        _effort_labels = {1: "trivial", 2: "small", 3: "moderate"}
+        if impact_score in _impact_colors:
+            parts.append(
+                f'<span style="background:{_impact_colors[impact_score]}; color:#000; '
+                f'font-size:0.75em; padding:1px 6px; border-radius:4px; font-weight:600;">'
+                f'Impact {impact_score}</span>'
+            )
+        if effort_score in _effort_colors:
+            parts.append(
+                f'<span style="background:{_effort_colors[effort_score]}; color:#000; '
+                f'font-size:0.75em; padding:1px 6px; border-radius:4px; font-weight:600;">'
+                f'Effort: {_effort_labels.get(effort_score, str(effort_score))}</span>'
+            )
+        if improvement_category:
+            parts.append(
+                f'<span style="color:#81c784; font-size:0.82em;">'
+                f'{_e(improvement_category.replace("_", " ").title())}</span>'
+            )
+
     elif finding.category == "security":
         issue_type = (payload.get("issue_type") or "").replace("_", " ")
         if issue_type:
@@ -316,6 +341,7 @@ def _render_list_badges(finding: Finding, dismissal_active: bool = False) -> str
             "structural": ("🏗️ Structural improvement", "#ce93d8"),
             "core_removal": ("🔴 Core content removed", "#ff5252"),
             "refactoring": ("🔧 Refactoring suggested", "#ce93d8"),
+            "improvement": ("💡 Improvement suggestion", "#81c784"),
         }
         category = finding.category or ""
         if category in _category_labels:
@@ -1049,6 +1075,132 @@ def _render_general_finding_detail(finding: Finding) -> str:
     )
 
 
+def _render_improvement_payload(payload: dict, finding: Finding) -> str:
+    """Render a detail card for an improvement/1.0 finding.
+
+    Shows impact/effort scores as colored badges and the improvement category.
+    """
+    sections: list[str] = []
+
+    # --- Impact and effort score badges ---
+    impact_score = payload.get("impact_score")
+    effort_score = payload.get("effort_score")
+    improvement_category = payload.get("improvement_category", "")
+
+    _impact_colors = {3: "#ffee58", 4: "#ffb74d", 5: "#ff5252"}
+    _impact_labels = {3: "Moderate impact", 4: "High impact", 5: "Critical impact"}
+    _effort_colors = {1: "#a5d6a7", 2: "#ffee58", 3: "#ffb74d"}
+    _effort_labels = {1: "Trivial effort", 2: "Small effort", 3: "Moderate effort"}
+
+    badge_parts: list[str] = []
+    if impact_score in _impact_colors:
+        badge_parts.append(
+            f'<span style="background:{_impact_colors[impact_score]}; color:#000; '
+            f'font-size:0.82em; padding:2px 8px; border-radius:4px; font-weight:600;">'
+            f'{_impact_labels.get(impact_score, f"Impact {impact_score}")}</span>'
+        )
+    if effort_score in _effort_colors:
+        badge_parts.append(
+            f'<span style="background:{_effort_colors[effort_score]}; color:#000; '
+            f'font-size:0.82em; padding:2px 8px; border-radius:4px; font-weight:600;">'
+            f'{_effort_labels.get(effort_score, f"Effort {effort_score}")}</span>'
+        )
+    if improvement_category:
+        _cat_labels = {
+            "ease_of_use": "🎯 Ease of Use",
+            "reliability": "🛡️ Reliability",
+            "security_hardening": "🔐 Security Hardening",
+            "completeness": "📦 Completeness",
+            "developer_experience": "🧑‍💻 Developer Experience",
+        }
+        cat_label = _cat_labels.get(improvement_category, improvement_category.replace("_", " ").title())
+        badge_parts.append(
+            f'<span style="background:rgba(129,199,132,0.2); color:#81c784; '
+            f'font-size:0.82em; padding:2px 8px; border-radius:4px; border:1px solid rgba(129,199,132,0.4);">'
+            f'{cat_label}</span>'
+        )
+
+    if badge_parts:
+        sections.append(
+            '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">'
+            + " ".join(badge_parts)
+            + '</div>'
+        )
+
+    # --- Description sections ---
+    description = finding.description
+    if description:
+        import json as _json_imp
+        try:
+            if '\\n' in description or '\\u' in description:
+                description = _json_imp.loads(f'"{description}"')
+        except Exception:
+            pass
+
+        # Split on double newlines (the 3 sections: suggestion, rationale, before/after)
+        desc_sections = [s.strip() for s in description.split('\n\n') if s.strip()]
+        section_titles = ["Suggestion", "Rationale", "Before / After Example"]
+        for i, section_content in enumerate(desc_sections):
+            title = section_titles[i] if i < len(section_titles) else f"Section {i + 1}"
+            sections.append(
+                f'<div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:12px 16px; margin-bottom:8px;">'
+                f'<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; '
+                f'color:rgba(255,255,255,0.4); margin-bottom:6px;">{title}</div>'
+                f'<div style="color:rgba(255,255,255,0.85); font-size:0.9em; line-height:1.7; white-space:pre-wrap;">{_e(section_content)}</div>'
+                f'</div>'
+            )
+
+    # --- Source URLs ---
+    source_urls = finding.source_urls
+    if source_urls:
+        url_parts = []
+        for url in source_urls[:5]:
+            url_parts.append(
+                f'<a href="{_e(url)}" target="_blank" style="color:#90c8ff; font-size:0.85em;">'
+                f'{_e(url[:70])}{"…" if len(url) > 70 else ""}</a>'
+            )
+        sections.append(
+            '<div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:8px; margin-top:4px;">'
+            '<div style="font-size:0.72em; text-transform:uppercase; letter-spacing:1px; '
+            'color:rgba(255,255,255,0.4); margin-bottom:6px;">References</div>'
+            + '<br>'.join(url_parts)
+            + '</div>'
+        )
+
+    # --- Review status ---
+    review_status = finding.review_status
+    review_notes = finding.review_notes
+    if review_status == "disputed":
+        dispute_reason = review_notes or "No reason provided."
+        sections.append(
+            '<div style="background:rgba(239,83,80,0.1); border:1px solid rgba(239,83,80,0.35); '
+            'padding:14px 18px; border-radius:10px;">'
+            '<div style="color:#ef9a9a; font-weight:700; margin-bottom:8px;">⛔ Disputed</div>'
+            f'<div style="color:#ffcdd2; font-size:0.88em; line-height:1.7; white-space:pre-wrap;">{_e(dispute_reason)}</div>'
+            '</div>'
+        )
+    elif review_status == "confirmed":
+        sections.append(
+            '<div style="display:flex; align-items:center; gap:10px; padding:10px 14px; '
+            'background:rgba(165,214,167,0.07); border-radius:8px; font-size:0.85em;">'
+            '<span style="font-size:1.1em;">✅</span>'
+            '<span style="color:#a5d6a7;">Verified — this improvement suggestion is valid.</span>'
+            '</div>'
+        )
+
+    inner = '\n'.join(f'<div style="margin-bottom:10px;">{s}</div>' for s in sections)
+
+    return (
+        "<details>"
+        "<summary style='cursor:pointer; color:rgba(255,255,255,0.5); font-size:0.85em; "
+        "padding:8px 0; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;'>"
+        "<span style='font-size:0.8em;'>▶</span> View improvement details"
+        "</summary>"
+        f'<div style="padding:16px 4px 4px 4px;">{inner}</div>'
+        "</details>"
+    )
+
+
 def _render_auditor_payload(
     payload: Optional[dict],
     schema_version: Optional[str],
@@ -1058,12 +1210,15 @@ def _render_auditor_payload(
 
     - ``schema_version`` starting with ``"currency/"`` → ``_render_currency_payload()``
     - ``schema_version`` starting with ``"automation/"`` → ``_render_automation_payload()``
+    - ``schema_version`` starting with ``"improvement/"`` → ``_render_improvement_payload()``
     - All other findings → ``_render_general_finding_detail()``
     """
     if schema_version and schema_version.startswith("currency/") and payload:
         return _render_currency_payload(payload, finding)
     if schema_version and schema_version.startswith("automation/") and payload:
         return _render_automation_payload(payload, finding)
+    if schema_version and schema_version.startswith("improvement/") and payload:
+        return _render_improvement_payload(payload, finding)
     # For analysis, refactoring, new_content, guidance_update, etc.
     return _render_general_finding_detail(finding)
 
@@ -1438,6 +1593,12 @@ async def dashboard_page(
             "label": "🔒 Security Auditor",
             "description": "Scans reference files that describe generated code (scripts, Terraform, Python adapters) for security vulnerabilities. Flags open admin ports, secrets in shell variables, plaintext database passwords, missing deletion protection, and other security anti-patterns in generated infrastructure. These findings should be prioritized — they represent real vulnerabilities in code the plugin generates for users.",
             "categories": {"security"},
+            "findings": [],
+        },
+        "improvement": {
+            "label": "💡 Improvement Advisor",
+            "description": "Proactively identifies high-impact, low-cost improvements to the migration plugin's reference files. Suggestions focus on ease of use, reliability, completeness, security hardening, and developer experience.",
+            "categories": {"improvement"},
             "findings": [],
         },
     }
