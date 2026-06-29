@@ -3,7 +3,7 @@
 Automated quality assurance for the GCP-to-AWS migration plugin at
 [awslabs/startups/migrate](https://github.com/awslabs/startups/tree/main/migrate).
 Keeps migration guidance accurate and progressively more automated by running
-six AI agents on every pull request and on a weekly schedule.
+seven AI agents on every pull request and on a weekly schedule.
 
 ---
 
@@ -26,13 +26,16 @@ At the same time, the runbooks tell users to do things manually — "go to the
 Service Quotas console and request an increase" — when AWS CLI commands exist
 that could do the same thing automatically.
 
-**The Watchdog solves both problems:**
+**The Watchdog solves these problems:**
 
 1. **Currency** — detects when factual claims in the reference files diverge
    from authoritative AWS sources, and flags them with suggested fixes.
 2. **Automation** — identifies manual steps in the runbooks that could be
    scripted, checks whether the generated scripts already cover them, and
    recommends CLI equivalents where safe to automate.
+3. **Improvement** — proactively surfaces high-impact, low-cost improvements
+   to the plugin's reference files across ease of use, reliability, security
+   hardening, completeness, and developer experience.
 
 ---
 
@@ -80,7 +83,7 @@ GitHub PR / weekly cron
 
 ---
 
-## The six agents
+## The seven agents
 
 ### 1. Analysis Agent
 
@@ -287,6 +290,32 @@ and find authoritative source URLs before flagging issues.
 
 ---
 
+### 7. Improvement Advisor
+
+**Model:** Claude Opus 4.7 (`us.anthropic.claude-opus-4-7`) for generation; Nova 2 Lite for verification
+
+**Purpose:** Proactively surfaces high-impact, low-cost improvements to the plugin's
+reference files that no other agent catches. Focuses on five dimensions: ease of use,
+reliability, security hardening, completeness, and developer experience.
+
+**What it does:**
+- Reads all reference files (GCP-to-AWS and Heroku-to-AWS) and generates improvement suggestions
+- Detects structural completeness gaps (e.g., Heroku-to-AWS skill has no phase files)
+- Scores every suggestion with impact (3–5) and effort (1–3) — only high-value, low-cost items surface
+- Verifies new-service suggestions against live AWS documentation before emitting
+
+**Overlap prevention:**
+- System prompt explicitly excludes domains owned by other agents (pricing drift, deprecated models, CLI automation, code security, persona routing)
+- Narrow code-level safety net catches high-confidence misroutes by title prefix
+
+**Limitations:**
+- Runs only during weekly scheduled scans (skipped on PR-triggered runs)
+- 300-second timeout with 240s internal budget — large plugin growth may require batching adjustments
+- Cannot see JSON reference files (RepoScanner fetches `.md` only)
+- Improvement findings never fail CI regardless of severity
+
+---
+
 | Severity | Risk | CI behavior |
 |----------|------|-------------|
 | `correctness` | HIGH | Fails PR check — blocks merge |
@@ -294,6 +323,7 @@ and find authoritative source URLs before flagging issues.
 | `policy_change` | LOW | Informational |
 | `informational` | LOW | Informational |
 | Automation gaps | varies | Never fail CI |
+| Improvement suggestions | MEDIUM | Never fail CI (weekly scans only) |
 
 ---
 
@@ -453,6 +483,7 @@ migration-watchdog/
 │   ├── refactoring_agent.py     ← Refactoring Agent (structural assessment)
 │   ├── security_auditor.py      ← Security Auditor (LLM-based security pattern detection)
 │   ├── scenario_auditor.py      ← Scenario Simulation Agent orchestrator
+│   ├── improvement_advisor.py   ← Improvement Advisor (proactive quality suggestions)
 │   ├── coverage_assessor.py     ← Coverage assessment (LLM-based, per persona × file)
 │   ├── path_tracer.py           ← Deterministic path tracing through plugin state machine
 │   ├── persona_library.py       ← Persona loading and validation
@@ -484,7 +515,8 @@ migration-watchdog/
 │       ├── test_gap_classifier.py
 │       ├── test_path_tracer.py
 │       ├── test_persona_library.py
-│       └── test_scenario_auditor.py
+│       ├── test_scenario_auditor.py
+│       └── test_improvement_advisor.py
 ├── pyproject.toml
 ├── setup.py
 └── .github/
