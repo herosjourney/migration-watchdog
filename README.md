@@ -1,6 +1,6 @@
 # Migration Plugin Watchdog
 
-Automated quality assurance for the GCP-to-AWS migration plugin at
+Automated quality assurance for the GCP-to-AWS and Heroku-to-AWS migration plugin at
 [awslabs/startups/migrate](https://github.com/awslabs/startups/tree/main/migrate).
 Keeps migration guidance accurate and progressively more automated by running
 seven AI agents on every pull request and on a weekly schedule.
