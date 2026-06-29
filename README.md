@@ -296,11 +296,14 @@ and find authoritative source URLs before flagging issues.
 
 **Purpose:** Proactively surfaces high-impact, low-cost improvements to the plugin's
 reference files that no other agent catches. Focuses on five dimensions: ease of use,
-reliability, security hardening, completeness, and developer experience.
+reliability, security hardening, completeness, and developer experience. Covers all
+migration paths — GCP-to-AWS infrastructure, Heroku-to-AWS, and AI/agentic workload
+migrations.
 
 **What it does:**
-- Reads all reference files (GCP-to-AWS and Heroku-to-AWS) and generates improvement suggestions
-- Detects structural completeness gaps (e.g., Heroku-to-AWS skill has no phase files)
+- Reads all reference files across both skills (GCP-to-AWS and Heroku-to-AWS) and generates improvement suggestions
+- Detects structural completeness gaps (e.g., Heroku-to-AWS skill has no phase files, AI/agentic migration design-refs missing from Heroku path)
+- Identifies improvements to AI and agentic migration guidance (Bedrock model mapping clarity, framework retarget gotchas, AgentCore/Strands documentation gaps)
 - Scores every suggestion with impact (3–5) and effort (1–3) — only high-value, low-cost items surface
 - Verifies new-service suggestions against live AWS documentation before emitting
 
